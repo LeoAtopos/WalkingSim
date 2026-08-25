@@ -1,0 +1,22 @@
+{
+  "name": "leo-ding-walking-simulator",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "build:itch": "tsc && vite build --base ./ --outDir foritch --emptyOutDir",
+    "build:pages": "tsc && vite build --base ./ --outDir forpages --emptyOutDir",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.19.3",
+    "three": "^0.180.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.180.0",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.3"
+  }
+}
