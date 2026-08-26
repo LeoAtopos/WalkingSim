@@ -147,6 +147,7 @@ class WalkingSimApp {
     this.ui.update(
       this.simulation.state,
       this.renderer.getPlayerScreenPosition(this.simulation.state),
+      this.renderer.getPortraitScreenPosition(),
       this.renderer.isPortraitCameraReady(),
     );
   }

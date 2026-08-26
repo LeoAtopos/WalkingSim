@@ -283,8 +283,8 @@ button {
 
 .dialogue-card {
   position: absolute;
-  right: clamp(24px, 7vw, 110px);
-  bottom: clamp(28px, 8vh, 90px);
+  left: calc(50% + 150px);
+  top: calc(50% + 78px);
   width: min(440px, calc(100vw - 48px));
   padding: 28px 30px 26px;
   color: var(--ink);
@@ -649,8 +649,8 @@ button {
 
 .speed-console {
   position: absolute;
-  right: 26px;
-  bottom: 28px;
+  left: calc(50% + 112px);
+  top: calc(50% + 150px);
   width: 235px;
   padding: 15px 16px;
   color: var(--cream);
@@ -1153,7 +1153,8 @@ body.custom-cursor * {
   }
 
   .dialogue-card {
-    right: 18px;
+    left: 18px;
+    top: auto;
     bottom: 22px;
     width: calc(100vw - 36px);
     padding: 20px;
@@ -1218,6 +1219,8 @@ body.custom-cursor * {
   }
 
   .speed-console {
+    left: auto;
+    top: auto;
     right: 10px;
     bottom: 16px;
     width: 142px;
@@ -1269,6 +1272,7 @@ body.custom-cursor * {
   }
 
   .dialogue-card {
+    top: auto;
     bottom: 24px;
   }
 }

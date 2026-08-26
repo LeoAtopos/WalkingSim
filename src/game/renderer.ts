@@ -537,6 +537,15 @@ export class GameRenderer {
     };
   }
 
+  getPortraitScreenPosition(): { x: number; y: number; visible: boolean } {
+    this.liHead.getWorldPosition(this.projected).project(this.camera);
+    return {
+      x: (this.projected.x * 0.5 + 0.5) * window.innerWidth,
+      y: (-this.projected.y * 0.5 + 0.5) * window.innerHeight,
+      visible: this.projected.z > -1 && this.projected.z < 1,
+    };
+  }
+
   resize(): void {
     const width = Math.max(1, window.innerWidth);
     const height = Math.max(1, window.innerHeight);

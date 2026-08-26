@@ -42,6 +42,9 @@ export class GameUI {
   private readonly audioIcon: HTMLElement;
   private readonly audioLabel: HTMLElement;
   private readonly exitConfirmation: HTMLElement;
+  private readonly introDialogue: HTMLElement;
+  private readonly returnDialogue: HTMLElement;
+  private readonly speedConsole: HTMLElement;
   private readonly taskElements = new Map<string, { row: HTMLElement; fill: HTMLElement; status: HTMLElement; time: HTMLElement }>();
   private lastInteractionCount = 0;
   private lastMode: GameState['mode'] | null = null;
@@ -184,6 +187,9 @@ export class GameUI {
     this.audioIcon = this.getElement('audio-icon');
     this.audioLabel = this.getElement('audio-label');
     this.exitConfirmation = this.getElement('exit-confirmation');
+    this.introDialogue = this.root.querySelector<HTMLElement>('.intro-dialogue') as HTMLElement;
+    this.returnDialogue = this.root.querySelector<HTMLElement>('.return-dialogue') as HTMLElement;
+    this.speedConsole = this.root.querySelector<HTMLElement>('.speed-console') as HTMLElement;
 
     this.createTaskRows();
     this.createSpeedDots();
@@ -291,13 +297,21 @@ export class GameUI {
     this.setExitConfirmation(!this.isExitConfirmationOpen());
   }
 
-  update(state: GameState, playerScreen: { x: number; y: number; visible: boolean }, portraitReady: boolean): void {
+  update(
+    state: GameState,
+    playerScreen: { x: number; y: number; visible: boolean },
+    portraitScreen: { x: number; y: number; visible: boolean },
+    portraitReady: boolean,
+  ): void {
     if (this.lastMode !== state.mode) {
       this.lastMode = state.mode;
       this.updateMode(state);
     }
     this.introScreen.classList.toggle('is-dialogue-waiting', state.mode === 'intro' && !portraitReady);
     this.returnScreen.classList.toggle('is-dialogue-waiting', state.mode === 'return' && !portraitReady);
+    if ((state.mode === 'intro' || state.mode === 'return') && portraitScreen.visible) {
+      this.positionNearCharacter(state.mode === 'intro' ? this.introDialogue : this.returnDialogue, portraitScreen, 'portrait');
+    }
     if (state.mode === 'walking') this.updateWalking(state, playerScreen);
     if (state.mode === 'interaction') this.updateInteraction(state);
   }
@@ -325,6 +339,7 @@ export class GameUI {
   }
 
   private updateWalking(state: GameState, playerScreen: { x: number; y: number; visible: boolean }): void {
+    if (playerScreen.visible) this.positionNearCharacter(this.speedConsole, playerScreen, 'walking');
     const active = SPEEDS[state.speedLevel];
     const pausedForSpeech = Boolean(state.speech);
     const showTaskCompleteArt = state.allTasksComplete && !pausedForSpeech;
@@ -374,6 +389,26 @@ export class GameUI {
     this.impactText.classList.toggle('is-strong', state.impactStrength > 0.6);
     this.impactText.textContent = state.impactLabel;
     this.completionButton.classList.toggle('is-hidden', !state.allTasksComplete || pausedForSpeech);
+  }
+
+  private positionNearCharacter(
+    element: HTMLElement,
+    anchor: { x: number; y: number },
+    kind: 'portrait' | 'walking',
+  ): void {
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const margin = viewportWidth <= 760 ? 14 : 24;
+    const width = element.offsetWidth || (kind === 'portrait' ? Math.min(440, viewportWidth - margin * 2) : 235);
+    const height = element.offsetHeight || (kind === 'portrait' ? 230 : 150);
+    const offsetX = kind === 'portrait' ? (viewportWidth <= 760 ? 44 : 150) : (viewportWidth <= 760 ? 74 : 112);
+    const offsetY = kind === 'portrait' ? (viewportWidth <= 760 ? 84 : 78) : (viewportWidth <= 760 ? 112 : 150);
+    const left = Math.max(margin, Math.min(viewportWidth - width - margin, anchor.x + offsetX));
+    const top = Math.max(margin, Math.min(viewportHeight - height - margin, anchor.y + offsetY));
+    element.style.left = `${Math.round(left)}px`;
+    element.style.top = `${Math.round(top)}px`;
+    element.style.right = 'auto';
+    element.style.bottom = 'auto';
   }
 
   private updateInteraction(state: GameState): void {
