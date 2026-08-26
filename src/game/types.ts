@@ -9,7 +9,7 @@ export interface SpeedDefinition {
   label: string;
   shortLabel: string;
   value: number;
-  phrase: string;
+  phrases: readonly [string, string, string];
 }
 
 export interface SpeedTask {
@@ -43,6 +43,8 @@ export interface GameState {
   tasks: Record<SpeedDefinition['id'], SpeedTask>;
   speech: SpeechState | null;
   speechQueue: string[];
+  pendingEvaluation: SpeedDefinition['id'] | null;
+  selectedEvaluations: Partial<Record<SpeedDefinition['id'], string>>;
   allTasksComplete: boolean;
   elapsed: number;
   distance: number;
@@ -63,35 +65,35 @@ export const SPEEDS: readonly SpeedDefinition[] = [
     label: COPY.speeds.stopped.label,
     shortLabel: COPY.speeds.stopped.shortLabel,
     value: 0,
-    phrase: COPY.speeds.stopped.phrase,
+    phrases: COPY.speeds.stopped.phrases,
   },
   {
     id: 'slow',
     label: COPY.speeds.slow.label,
     shortLabel: COPY.speeds.slow.shortLabel,
     value: 10.4,
-    phrase: COPY.speeds.slow.phrase,
+    phrases: COPY.speeds.slow.phrases,
   },
   {
     id: 'normal',
     label: COPY.speeds.normal.label,
     shortLabel: COPY.speeds.normal.shortLabel,
     value: 23.2,
-    phrase: COPY.speeds.normal.phrase,
+    phrases: COPY.speeds.normal.phrases,
   },
   {
     id: 'brisk',
     label: COPY.speeds.brisk.label,
     shortLabel: COPY.speeds.brisk.shortLabel,
     value: 36.8,
-    phrase: COPY.speeds.brisk.phrase,
+    phrases: COPY.speeds.brisk.phrases,
   },
   {
     id: 'run',
     label: COPY.speeds.run.label,
     shortLabel: COPY.speeds.run.shortLabel,
     value: 80.4,
-    phrase: COPY.speeds.run.phrase,
+    phrases: COPY.speeds.run.phrases,
   },
 ] as const;
 

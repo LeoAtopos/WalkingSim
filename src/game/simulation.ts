@@ -87,6 +87,8 @@ export class WalkingSimulation {
       tasks: freshTasks(),
       speech: null,
       speechQueue: [],
+      pendingEvaluation: null,
+      selectedEvaluations: {},
       allTasksComplete: false,
       elapsed: 0,
       distance: 0,
@@ -114,7 +116,7 @@ export class WalkingSimulation {
   }
 
   setSpeedLevel(level: number): void {
-    if (this.state.mode !== 'walking' || this.state.speech) return;
+    if (this.state.mode !== 'walking' || this.state.speech || this.state.pendingEvaluation) return;
     const next = Math.max(0, Math.min(SPEEDS.length - 1, level));
     if (next !== this.state.speedLevel) {
       const previousTask = this.state.tasks[SPEEDS[this.state.speedLevel].id];
@@ -129,10 +131,11 @@ export class WalkingSimulation {
   }
 
   finishWalk(): void {
-    if (this.state.mode !== 'walking' || this.state.speech || !this.state.allTasksComplete) return;
+    if (this.state.mode !== 'walking' || this.state.speech || this.state.pendingEvaluation || !this.state.allTasksComplete) return;
     this.state.mode = 'return';
     this.state.speech = null;
     this.state.speechQueue = [];
+    this.state.pendingEvaluation = null;
   }
 
   chooseInteraction(kind: Exclude<GameState['interaction'], null>): void {
@@ -159,6 +162,17 @@ export class WalkingSimulation {
     if (!this.state.speech || this.state.speech.elapsed < SPEECH_CONTINUE_DELAY) return;
     const next = this.state.speechQueue.shift();
     this.state.speech = next ? { text: next, elapsed: 0 } : null;
+  }
+
+  chooseEvaluation(choiceIndex: number): void {
+    const evaluationId = this.state.pendingEvaluation;
+    if (this.state.mode !== 'walking' || !evaluationId) return;
+    const speed = SPEEDS.find((definition) => definition.id === evaluationId);
+    const text = speed?.phrases[choiceIndex];
+    if (!text) return;
+    this.state.pendingEvaluation = null;
+    this.state.selectedEvaluations[evaluationId] = text;
+    this.state.speech = { text, elapsed: 0 };
   }
 
   registerCollision(relativeSpeed: number, npcId?: string, side: CollisionSide = 'ahead'): void {
@@ -204,8 +218,8 @@ export class WalkingSimulation {
 
   update(dt: number): void {
     const state = this.state;
-    if (state.mode === 'walking' && state.speech) {
-      state.speech.elapsed += dt;
+    if (state.mode === 'walking' && (state.speech || state.pendingEvaluation)) {
+      if (state.speech) state.speech.elapsed += dt;
       return;
     }
     state.elapsed += dt;
@@ -239,8 +253,7 @@ export class WalkingSimulation {
         state.impactTextTime = 0;
         state.impactStrength = 0;
         state.impactLabel = '';
-        if (state.speech) state.speechQueue.push(speed.phrase);
-        else state.speech = { text: speed.phrase, elapsed: 0 };
+        state.pendingEvaluation = speed.id;
       }
     }
 

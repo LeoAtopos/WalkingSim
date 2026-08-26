@@ -33,6 +33,7 @@ class WalkingSimApp {
       onStart: () => this.startWalking(),
       onSpeedChange: (delta) => this.changeSpeed(delta),
       onDismissSpeech: () => this.dismissSpeech(),
+      onChooseEvaluation: (choiceIndex) => this.chooseEvaluation(choiceIndex),
       onFinishWalk: () => this.finishWalk(),
       onChooseInteraction: (kind) => this.chooseInteraction(kind),
       onInteract: () => this.interactWithLi(),
@@ -97,6 +98,12 @@ class WalkingSimApp {
     const before = this.simulation.state.speech;
     this.simulation.dismissSpeech();
     if (before && this.simulation.state.speech !== before) this.audio.playContinue();
+  }
+
+  private chooseEvaluation(choiceIndex: number): void {
+    const before = this.simulation.state.pendingEvaluation;
+    this.simulation.chooseEvaluation(choiceIndex);
+    if (before && !this.simulation.state.pendingEvaluation) this.audio.playContinue();
   }
 
   private finishWalk(): void {
@@ -235,7 +242,16 @@ class WalkingSimApp {
         speechSecondsVisible: state.speech ? Number(state.speech.elapsed.toFixed(2)) : null,
         speechCanContinue: state.speech ? state.speech.elapsed >= SPEECH_CONTINUE_DELAY : null,
         queuedSpeeches: state.speechQueue.length,
+        pendingEvaluation: state.pendingEvaluation
+          ? {
+              speedId: state.pendingEvaluation,
+              speedLabel: SPEEDS.find((speed) => speed.id === state.pendingEvaluation)?.label,
+              options: SPEEDS.find((speed) => speed.id === state.pendingEvaluation)?.phrases ?? [],
+            }
+          : null,
+        selectedEvaluations: state.selectedEvaluations,
         pausedForSpeech: state.mode === 'walking' && Boolean(state.speech),
+        pausedForEvaluation: state.mode === 'walking' && Boolean(state.pendingEvaluation),
         allTasksComplete: state.allTasksComplete,
         nearbyNpcs: state.npcs
           .filter((npc) => Math.abs(npc.z - state.player.z) < 28)
@@ -271,7 +287,15 @@ class WalkingSimApp {
           : null,
         audio: this.audio.getDebugState(),
         interaction: state.interaction
-          ? { kind: state.interaction, clicks: state.interactionCount, targetClicks: INTERACTION_TARGET, restartReady: state.interactionCount >= INTERACTION_TARGET }
+          ? {
+              kind: state.interaction,
+              clicks: state.interactionCount,
+              targetClicks: INTERACTION_TARGET,
+              restartReady: state.interactionCount >= INTERACTION_TARGET,
+              feedback: state.interactionCount > 0
+                ? COPY.interaction.feedback[state.interaction][(state.interactionCount - 1) % INTERACTION_TARGET]
+                : null,
+            }
           : null,
       });
     };
@@ -282,6 +306,7 @@ class WalkingSimApp {
     if (this.ui.isExitConfirmationOpen()) return [COPY.debug.exitCancel, COPY.debug.exitConfirm];
     if (state.mode === 'intro') return [COPY.debug.start];
     if (state.mode === 'walking') {
+      if (state.pendingEvaluation) return [0, 1, 2].map((index) => COPY.debug.chooseEvaluation(index));
       if (state.speech) return state.speech.elapsed >= SPEECH_CONTINUE_DELAY
         ? [COPY.debug.dismissSpeech]
         : [COPY.debug.waitForSpeech((SPEECH_CONTINUE_DELAY - state.speech.elapsed).toFixed(1))];

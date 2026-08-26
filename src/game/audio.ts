@@ -121,7 +121,7 @@ export class GameAudio {
     this.lastStrongCollisions = state.strongCollisions;
     this.lastMinorBumps = state.minorBumps;
 
-    if (state.mode !== 'walking' || state.speech || state.speedLevel === 0) {
+    if (state.mode !== 'walking' || state.speech || state.pendingEvaluation || state.speedLevel === 0) {
       this.footstepClock = 0;
       return;
     }

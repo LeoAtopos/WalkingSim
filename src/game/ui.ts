@@ -5,6 +5,7 @@ interface UIActions {
   onStart: () => void;
   onSpeedChange: (delta: number) => void;
   onDismissSpeech: () => void;
+  onChooseEvaluation: (choiceIndex: number) => void;
   onFinishWalk: () => void;
   onChooseInteraction: (kind: Exclude<InteractionKind, null>) => void;
   onInteract: () => void;
@@ -45,11 +46,16 @@ export class GameUI {
   private readonly introDialogue: HTMLElement;
   private readonly returnDialogue: HTMLElement;
   private readonly speedConsole: HTMLElement;
+  private readonly evaluationPanel: HTMLElement;
+  private readonly evaluationSpeed: HTMLElement;
+  private readonly evaluationChoices: HTMLElement;
+  private readonly interactionBalloons: HTMLElement;
   private readonly taskElements = new Map<string, { row: HTMLElement; fill: HTMLElement; status: HTMLElement; time: HTMLElement }>();
   private lastInteractionCount = 0;
   private lastMode: GameState['mode'] | null = null;
   private interactionUnlockAt = 0;
   private speechCanContinue = false;
+  private lastPendingEvaluation: GameState['pendingEvaluation'] = null;
 
   constructor(container: HTMLElement, private readonly actions: UIActions) {
     this.root = document.createElement('div');
@@ -94,6 +100,14 @@ export class GameUI {
         </button>
         <div id="impact-text" class="impact-text is-hidden">${COPY.collisions.minor}</div>
 
+        <div id="task-evaluation" class="task-evaluation is-hidden" role="dialog" aria-modal="true">
+          <div class="task-evaluation-card">
+            <div class="task-evaluation-heading"><span>${COPY.walking.evaluationKicker}</span><b id="evaluation-speed"></b></div>
+            <h2>${COPY.walking.evaluationPrompt}</h2>
+            <div id="evaluation-choices" class="evaluation-choices"></div>
+          </div>
+        </div>
+
         <div class="speed-console" aria-live="polite">
           <div class="speed-console-top">
             <span>${COPY.walking.currentSpeed}</span>
@@ -122,7 +136,7 @@ export class GameUI {
         <div class="portrait-kicker"><span>Walking Sim</span><b>END?</b></div>
         <div class="dialogue-card return-dialogue">
           <div class="dialogue-speaker">${COPY.characterName}</div>
-          <p>${COPY.returning.line1}<br />${COPY.returning.line2}</p>
+          <p>${COPY.returning.line1}${COPY.returning.line2 ? `<br />${COPY.returning.line2}` : ''}</p>
           <div class="choice-row">
             <button id="choice-punch" class="game-button choice-button bad-choice">${COPY.returning.punchChoice}</button>
             <button id="choice-pet" class="game-button choice-button good-choice">${COPY.returning.petChoice}</button>
@@ -132,6 +146,7 @@ export class GameUI {
 
       <section id="interaction-screen" class="scene-ui interaction-ui is-hidden" aria-label="${COPY.aria.interaction}">
         <div id="interaction-burst" class="interaction-burst is-hidden">${COPY.interaction.punchEffect}</div>
+        <div id="interaction-balloons" class="interaction-balloons" aria-live="polite"></div>
         <div class="interaction-actions">
           <button id="depart-btn" class="text-button is-hidden">${COPY.interaction.depart}</button>
           <button id="restart-btn" class="game-button primary-button is-hidden">${COPY.interaction.restart} <span>↻</span></button>
@@ -190,6 +205,10 @@ export class GameUI {
     this.introDialogue = this.root.querySelector<HTMLElement>('.intro-dialogue') as HTMLElement;
     this.returnDialogue = this.root.querySelector<HTMLElement>('.return-dialogue') as HTMLElement;
     this.speedConsole = this.root.querySelector<HTMLElement>('.speed-console') as HTMLElement;
+    this.evaluationPanel = this.getElement('task-evaluation');
+    this.evaluationSpeed = this.getElement('evaluation-speed');
+    this.evaluationChoices = this.getElement('evaluation-choices');
+    this.interactionBalloons = this.getElement('interaction-balloons');
 
     this.createTaskRows();
     this.createSpeedDots();
@@ -242,6 +261,11 @@ export class GameUI {
     this.getElement('mobile-slow').addEventListener('click', () => this.actions.onSpeedChange(-1));
     this.getElement('mouse-fast').addEventListener('click', () => this.actions.onSpeedChange(1));
     this.getElement('mouse-slow').addEventListener('click', () => this.actions.onSpeedChange(-1));
+    this.evaluationChoices.addEventListener('click', (event) => {
+      const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-evaluation-choice]');
+      if (!button) return;
+      this.actions.onChooseEvaluation(Number(button.dataset.evaluationChoice));
+    });
     this.completionButton.addEventListener('click', this.actions.onFinishWalk);
     this.getElement('choice-punch').addEventListener('click', () => this.actions.onChooseInteraction('punch'));
     this.getElement('choice-pet').addEventListener('click', () => this.actions.onChooseInteraction('pet'));
@@ -333,22 +357,26 @@ export class GameUI {
     this.cursorFollower.classList.toggle('is-hidden', state.mode !== 'interaction');
     document.body.classList.toggle('custom-cursor', state.mode === 'interaction');
     if (state.mode !== 'walking') {
+      this.evaluationPanel.classList.add('is-hidden');
+      this.lastPendingEvaluation = null;
       this.impactFlash.classList.add('is-hidden');
       this.impactText.classList.add('is-hidden');
     }
+    if (state.mode !== 'interaction') this.interactionBalloons.replaceChildren();
   }
 
   private updateWalking(state: GameState, playerScreen: { x: number; y: number; visible: boolean }): void {
     if (playerScreen.visible) this.positionNearCharacter(this.speedConsole, playerScreen, 'walking');
     const active = SPEEDS[state.speedLevel];
-    const pausedForSpeech = Boolean(state.speech);
-    const showTaskCompleteArt = state.allTasksComplete && !pausedForSpeech;
+    const pausedForDialogue = Boolean(state.speech || state.pendingEvaluation);
+    const showTaskCompleteArt = state.allTasksComplete && !pausedForDialogue;
     this.taskPanel.classList.toggle('is-hidden', showTaskCompleteArt);
     this.taskCompleteArt.classList.toggle('is-hidden', !showTaskCompleteArt);
-    this.walkingHud.classList.toggle('is-speech-paused', pausedForSpeech);
+    this.walkingHud.classList.toggle('is-speech-paused', pausedForDialogue);
     this.root.querySelectorAll<HTMLButtonElement>('.speed-step-button').forEach((button) => {
-      button.disabled = pausedForSpeech;
+      button.disabled = pausedForDialogue;
     });
+    this.updateEvaluation(state.pendingEvaluation);
     let completed = 0;
     SPEEDS.forEach((speed) => {
       const task = state.tasks[speed.id];
@@ -388,7 +416,26 @@ export class GameUI {
     this.impactText.classList.toggle('is-hidden', !showImpactText);
     this.impactText.classList.toggle('is-strong', state.impactStrength > 0.6);
     this.impactText.textContent = state.impactLabel;
-    this.completionButton.classList.toggle('is-hidden', !state.allTasksComplete || pausedForSpeech);
+    this.completionButton.classList.toggle('is-hidden', !state.allTasksComplete || pausedForDialogue);
+  }
+
+  private updateEvaluation(evaluationId: GameState['pendingEvaluation']): void {
+    this.evaluationPanel.classList.toggle('is-hidden', !evaluationId);
+    if (!evaluationId || evaluationId === this.lastPendingEvaluation) return;
+    this.lastPendingEvaluation = evaluationId;
+    const speed = SPEEDS.find((definition) => definition.id === evaluationId);
+    if (!speed) return;
+    this.evaluationSpeed.textContent = speed.label;
+    this.evaluationChoices.replaceChildren(...speed.phrases.map((phrase, index) => {
+      const button = document.createElement('button');
+      button.id = `evaluation-choice-${index}`;
+      button.className = 'evaluation-choice';
+      button.type = 'button';
+      button.dataset.evaluationChoice = String(index);
+      button.innerHTML = `<span>0${index + 1}</span><b></b><i>→</i>`;
+      (button.querySelector('b') as HTMLElement).textContent = phrase;
+      return button;
+    }));
   }
 
   private positionNearCharacter(
@@ -421,6 +468,7 @@ export class GameUI {
     this.departButton.classList.toggle('is-hidden', !actionsReady);
 
     if (state.interactionCount > this.lastInteractionCount) {
+      const firstNewCount = this.lastInteractionCount + 1;
       this.lastInteractionCount = state.interactionCount;
       this.interactionBurst.classList.toggle('is-heart', !isPunch);
       this.interactionBurst.innerHTML = isPunch ? COPY.interaction.punchEffect : '<span>♥</span><span>♥</span><span>♥</span>';
@@ -429,6 +477,20 @@ export class GameUI {
       void this.interactionBurst.offsetWidth;
       this.interactionBurst.classList.add('animate');
       this.cursorFollower.classList.add('is-acting');
+      for (let count = firstNewCount; count <= state.interactionCount; count += 1) {
+        this.spawnInteractionBalloon(state, count);
+      }
     }
+  }
+
+  private spawnInteractionBalloon(state: GameState, interactionCount: number): void {
+    if (!state.interaction || interactionCount < 1) return;
+    const phraseIndex = (interactionCount - 1) % INTERACTION_TARGET;
+    const phrase = COPY.interaction.feedback[state.interaction][phraseIndex];
+    const balloon = document.createElement('div');
+    balloon.className = `interaction-balloon is-${state.interaction} balloon-${phraseIndex}`;
+    balloon.textContent = phrase;
+    balloon.addEventListener('animationend', () => balloon.remove(), { once: true });
+    this.interactionBalloons.append(balloon);
   }
 }

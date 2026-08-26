@@ -375,7 +375,7 @@ export class GameRenderer {
   }
 
   update(state: GameState, dt: number): void {
-    const sceneDt = state.mode === 'walking' && state.speech ? 0 : dt;
+    const sceneDt = state.mode === 'walking' && (state.speech || state.pendingEvaluation) ? 0 : dt;
     this.elapsed += sceneDt;
     const walking = state.mode === 'walking';
     this.worldGroup.visible = walking;

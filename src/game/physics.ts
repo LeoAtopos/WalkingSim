@@ -69,7 +69,7 @@ export class CrowdPhysics {
 
   update(dt: number): void {
     const state = this.simulation.state;
-    if (state.mode !== 'walking' || state.speech) return;
+    if (state.mode !== 'walking' || state.speech || state.pendingEvaluation) return;
 
     this.playerContacts.forEach((id) => {
       const age = (this.contactAges.get(id) ?? 0) + dt;
