@@ -1265,6 +1265,68 @@ body.custom-cursor * {
   }
 }
 
+@media (max-width: 760px) and (orientation: portrait) {
+  .task-panel {
+    top: 58px;
+    left: 8px;
+    width: 160px;
+    padding: 9px 8px;
+  }
+
+  html[lang="en"] .task-panel {
+    width: 184px;
+  }
+
+  .task-heading {
+    padding-bottom: 8px;
+  }
+
+  .task-list {
+    gap: 1px;
+    margin: 5px 0 0;
+  }
+
+  .task-row {
+    grid-template-columns: 22px minmax(0, 1fr);
+    min-height: 33px;
+    padding: 2px 3px;
+  }
+
+  .task-row.is-active {
+    transform: translateX(2px);
+  }
+
+  .task-index,
+  .task-copy small,
+  .task-footnote {
+    display: none;
+  }
+
+  .task-check {
+    width: 16px;
+    height: 16px;
+    font-size: 9px;
+  }
+
+  .task-copy {
+    min-width: 0;
+  }
+
+  .task-copy b {
+    overflow: hidden;
+    font-size: 10px;
+    line-height: 1.2;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .task-progress {
+    left: 27px;
+    right: 3px;
+    bottom: 1px;
+  }
+}
+
 @media (max-height: 650px) and (min-width: 761px) {
   .task-panel {
     transform: translateY(-48%) scale(0.88);

@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "build:itch": "tsc && vite build --base ./ --outDir foritch --emptyOutDir",
-    "build:pages": "tsc && vite build --base ./ --outDir forpages --emptyOutDir",
+    "build:pages": "tsc && vite build --base ./ --outDir docs --emptyOutDir",
     "preview": "vite preview"
   },
   "dependencies": {
