@@ -289,6 +289,7 @@ class WalkingSimApp {
         interaction: state.interaction
           ? {
               kind: state.interaction,
+              instruction: state.interaction === 'punch' ? COPY.interaction.punchHint : COPY.interaction.petHint,
               clicks: state.interactionCount,
               targetClicks: INTERACTION_TARGET,
               restartReady: state.interactionCount >= INTERACTION_TARGET,
@@ -304,7 +305,7 @@ class WalkingSimApp {
   private availableActions(): string[] {
     const state = this.simulation.state;
     if (this.ui.isExitConfirmationOpen()) return [COPY.debug.exitCancel, COPY.debug.exitConfirm];
-    if (state.mode === 'intro') return [COPY.debug.start];
+    if (state.mode === 'intro') return [COPY.debug.start, COPY.debug.share];
     if (state.mode === 'walking') {
       if (state.pendingEvaluation) return [0, 1, 2].map((index) => COPY.debug.chooseEvaluation(index));
       if (state.speech) return state.speech.elapsed >= SPEECH_CONTINUE_DELAY
@@ -314,9 +315,10 @@ class WalkingSimApp {
       if (state.allTasksComplete) actions.push(COPY.debug.finish);
       return actions;
     }
-    if (state.mode === 'return') return [COPY.debug.punchChoice, COPY.debug.petChoice];
+    if (state.mode === 'return') return [COPY.debug.punchChoice, COPY.debug.petChoice, COPY.debug.share];
     if (state.mode === 'interaction') return [
       COPY.debug.interact,
+      COPY.debug.share,
       ...(state.interactionCount >= INTERACTION_TARGET ? [COPY.debug.depart, COPY.debug.restart] : []),
     ];
     return [COPY.debug.departedRestart];

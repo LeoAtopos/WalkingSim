@@ -17,6 +17,7 @@ interface UIActions {
 }
 
 const CHECKLIST_SPEEDS = [...SPEEDS].reverse();
+const SHARE_URL = 'https://leoatopos.github.io/WalkingSim/';
 
 export class GameUI {
   private readonly root: HTMLDivElement;
@@ -50,12 +51,16 @@ export class GameUI {
   private readonly evaluationSpeed: HTMLElement;
   private readonly evaluationChoices: HTMLElement;
   private readonly interactionBalloons: HTMLElement;
+  private readonly interactionHint: HTMLElement;
+  private readonly shareToast: HTMLElement;
+  private readonly shareButton: HTMLButtonElement;
   private readonly taskElements = new Map<string, { row: HTMLElement; fill: HTMLElement; status: HTMLElement; time: HTMLElement }>();
   private lastInteractionCount = 0;
   private lastMode: GameState['mode'] | null = null;
   private interactionUnlockAt = 0;
   private speechCanContinue = false;
   private lastPendingEvaluation: GameState['pendingEvaluation'] = null;
+  private shareToastTimeout = 0;
 
   constructor(container: HTMLElement, private readonly actions: UIActions) {
     this.root = document.createElement('div');
@@ -65,6 +70,7 @@ export class GameUI {
       <button id="audio-toggle" class="audio-toggle" type="button" title="${COPY.audio.title}">
         <span id="audio-icon" aria-hidden="true">♪</span><b id="audio-label">${COPY.audio.sound}</b>
       </button>
+      <button id="portrait-share" class="share-button portrait-share is-hidden" type="button"><span aria-hidden="true">↗</span>${COPY.share.button}</button>
 
       <section id="intro-screen" class="scene-ui portrait-ui is-dialogue-waiting" aria-label="${COPY.aria.intro}">
         <div class="portrait-kicker"><span>Walking Sim</span><b>01</b></div>
@@ -145,6 +151,7 @@ export class GameUI {
       </section>
 
       <section id="interaction-screen" class="scene-ui interaction-ui is-hidden" aria-label="${COPY.aria.interaction}">
+        <div id="interaction-hint" class="interaction-hint" aria-live="polite"></div>
         <div id="interaction-burst" class="interaction-burst is-hidden">${COPY.interaction.punchEffect}</div>
         <div id="interaction-balloons" class="interaction-balloons" aria-live="polite"></div>
         <div class="interaction-actions">
@@ -152,6 +159,8 @@ export class GameUI {
           <button id="restart-btn" class="game-button primary-button is-hidden">${COPY.interaction.restart} <span>↻</span></button>
         </div>
       </section>
+
+      <div id="share-toast" class="share-toast is-hidden" role="status" aria-live="polite"></div>
 
       <section id="departed-screen" class="scene-ui departed-ui is-hidden" aria-label="${COPY.aria.departed}">
         <div class="departed-card">
@@ -209,6 +218,9 @@ export class GameUI {
     this.evaluationSpeed = this.getElement('evaluation-speed');
     this.evaluationChoices = this.getElement('evaluation-choices');
     this.interactionBalloons = this.getElement('interaction-balloons');
+    this.interactionHint = this.getElement('interaction-hint');
+    this.shareToast = this.getElement('share-toast');
+    this.shareButton = this.getElement('portrait-share') as HTMLButtonElement;
 
     this.createTaskRows();
     this.createSpeedDots();
@@ -257,6 +269,7 @@ export class GameUI {
     this.getElement('start-btn').addEventListener('click', this.actions.onStart);
     this.getElement('language-zh').addEventListener('click', () => setLanguagePreference('zh-CN'));
     this.getElement('language-en').addEventListener('click', () => setLanguagePreference('en'));
+    this.shareButton.addEventListener('click', () => void this.copyShareLink());
     this.getElement('mobile-fast').addEventListener('click', () => this.actions.onSpeedChange(1));
     this.getElement('mobile-slow').addEventListener('click', () => this.actions.onSpeedChange(-1));
     this.getElement('mouse-fast').addEventListener('click', () => this.actions.onSpeedChange(1));
@@ -306,6 +319,44 @@ export class GameUI {
     this.audioLabel.textContent = muted ? COPY.audio.muted : COPY.audio.sound;
   }
 
+  private async copyShareLink(): Promise<void> {
+    let copied = false;
+    if (navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(SHARE_URL);
+        copied = true;
+      } catch {
+        copied = false;
+      }
+    }
+    if (!copied) {
+      const input = document.createElement('textarea');
+      input.value = SHARE_URL;
+      input.setAttribute('readonly', '');
+      input.style.position = 'fixed';
+      input.style.opacity = '0';
+      document.body.append(input);
+      input.select();
+      copied = document.execCommand('copy');
+      input.remove();
+    }
+    if (copied) {
+      this.showShareToast(COPY.share.copied, false);
+    } else {
+      this.showShareToast(COPY.share.failed, true);
+    }
+  }
+
+  private showShareToast(message: string, failed: boolean): void {
+    window.clearTimeout(this.shareToastTimeout);
+    this.shareToast.textContent = message;
+    this.shareToast.classList.toggle('is-error', failed);
+    this.shareToast.classList.remove('is-hidden', 'animate');
+    void this.shareToast.offsetWidth;
+    this.shareToast.classList.add('animate');
+    this.shareToastTimeout = window.setTimeout(() => this.shareToast.classList.add('is-hidden'), 2400);
+  }
+
   isExitConfirmationOpen(): boolean {
     return !this.exitConfirmation.classList.contains('is-hidden');
   }
@@ -352,6 +403,7 @@ export class GameUI {
     ];
     screens.forEach(([element, visible]) => element.classList.toggle('is-hidden', !visible));
     this.root.classList.toggle('is-interacting', state.mode === 'interaction');
+    this.shareButton.classList.toggle('is-hidden', !['intro', 'return', 'interaction'].includes(state.mode));
     this.interactionUnlockAt = state.mode === 'interaction' ? performance.now() + 180 : 0;
     if (state.mode !== 'walking') this.speechCanContinue = false;
     this.cursorFollower.classList.toggle('is-hidden', state.mode !== 'interaction');
@@ -446,12 +498,13 @@ export class GameUI {
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
     const margin = viewportWidth <= 760 ? 14 : 24;
+    const bottomMargin = kind === 'portrait' && viewportWidth <= 760 ? 76 : margin;
     const width = element.offsetWidth || (kind === 'portrait' ? Math.min(440, viewportWidth - margin * 2) : 235);
     const height = element.offsetHeight || (kind === 'portrait' ? 230 : 150);
     const offsetX = kind === 'portrait' ? (viewportWidth <= 760 ? 44 : 150) : (viewportWidth <= 760 ? 74 : 112);
     const offsetY = kind === 'portrait' ? (viewportWidth <= 760 ? 84 : 78) : (viewportWidth <= 760 ? 112 : 150);
     const left = Math.max(margin, Math.min(viewportWidth - width - margin, anchor.x + offsetX));
-    const top = Math.max(margin, Math.min(viewportHeight - height - margin, anchor.y + offsetY));
+    const top = Math.max(margin, Math.min(viewportHeight - height - bottomMargin, anchor.y + offsetY));
     element.style.left = `${Math.round(left)}px`;
     element.style.top = `${Math.round(top)}px`;
     element.style.right = 'auto';
@@ -460,6 +513,9 @@ export class GameUI {
 
   private updateInteraction(state: GameState): void {
     const isPunch = state.interaction === 'punch';
+    this.interactionHint.textContent = isPunch ? COPY.interaction.punchHint : COPY.interaction.petHint;
+    this.interactionHint.classList.toggle('is-punch', isPunch);
+    this.interactionHint.classList.toggle('is-pet', !isPunch);
     this.cursorGlyph.textContent = isPunch ? '✊' : '🫳';
     this.cursorFollower.classList.toggle('is-punch', isPunch);
     this.cursorFollower.classList.toggle('is-pet', !isPunch);

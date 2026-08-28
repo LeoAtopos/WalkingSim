@@ -23,6 +23,7 @@ interface GameCopy {
     touchSpeed: string;
   };
   intro: { line1: string; line2: string; start: string };
+  share: { button: string; copied: string; failed: string };
   exitConfirm: { ariaLabel: string; kicker: string; title: string; body: string; cancel: string; confirm: string };
   walking: {
     tasks: string;
@@ -42,6 +43,8 @@ interface GameCopy {
   returning: { line1: string; line2: string; punchChoice: string; petChoice: string };
   interaction: {
     punchEffect: string;
+    punchHint: string;
+    petHint: string;
     depart: string;
     restart: string;
     feedback: {
@@ -69,6 +72,7 @@ interface GameCopy {
     exitCancel: string;
     exitConfirm: string;
     chooseEvaluation: (index: number) => string;
+    share: string;
   };
 }
 
@@ -91,6 +95,11 @@ const ZH: GameCopy = {
     touchSpeed: '触屏速度控制',
   },
   intro: { line1: '这是个「比喻性」的走路模拟器。', line2: '只能调节步速。', start: '玩一下' },
+  share: {
+    button: '点击分享给总是发生碰撞冲突的朋友',
+    copied: '已复制到剪切板',
+    failed: '复制失败，请手动复制链接',
+  },
   exitConfirm: {
     ariaLabel: '退出走路模拟器确认',
     kicker: 'ESC / EXIT',
@@ -122,6 +131,8 @@ const ZH: GameCopy = {
   },
   interaction: {
     punchEffect: '砰！',
+    punchHint: '点击李欧丁，教训他！',
+    petHint: '点击李欧丁，鼓励他',
     depart: '转身离开',
     restart: '重新开始',
     feedback: {
@@ -155,6 +166,7 @@ const ZH: GameCopy = {
     exitCancel: '点击 #exit-cancel：继续行走',
     exitConfirm: '点击 #exit-confirm：退出模拟',
     chooseEvaluation: (index) => `点击 #evaluation-choice-${index}：选择评语`,
+    share: '点击分享按钮：复制游戏链接',
   },
 };
 
@@ -177,6 +189,11 @@ const EN: GameCopy = {
     touchSpeed: 'Touch speed controls',
   },
   intro: { line1: 'This is a “metaphorical” walking simulator.', line2: 'The only thing you can control is your pace.', start: 'Give it a try' },
+  share: {
+    button: 'Share with a friend who keeps running into conflict',
+    copied: 'Link copied to clipboard',
+    failed: 'Could not copy. Please copy the link manually.',
+  },
   exitConfirm: {
     ariaLabel: 'Confirm exit from the walking simulator',
     kicker: 'ESC / EXIT',
@@ -208,6 +225,8 @@ const EN: GameCopy = {
   },
   interaction: {
     punchEffect: 'POW!',
+    punchHint: 'Click Leo Ding to teach him a lesson!',
+    petHint: 'Click Leo Ding to encourage him',
     depart: 'TURN AND LEAVE',
     restart: 'START OVER',
     feedback: {
@@ -246,6 +265,7 @@ const EN: GameCopy = {
     exitCancel: 'click #exit-cancel: keep walking',
     exitConfirm: 'click #exit-confirm: exit simulation',
     chooseEvaluation: (index) => `click #evaluation-choice-${index}: choose reflection`,
+    share: 'click a share button: copy game link',
   },
 };
 

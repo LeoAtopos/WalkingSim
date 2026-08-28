@@ -342,6 +342,90 @@ button {
   letter-spacing: 0.02em;
 }
 
+.share-button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: fit-content;
+  margin: 0;
+  padding: 9px 2px 5px;
+  border: 0;
+  border-bottom: 1px solid rgba(23, 49, 58, 0.44);
+  color: var(--ink);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 850;
+  line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
+  transition: color 140ms ease, border-color 140ms ease, transform 140ms ease;
+}
+
+.portrait-share {
+  position: absolute;
+  z-index: 16;
+  left: clamp(20px, 4vw, 62px);
+  bottom: clamp(18px, 3.5vh, 36px);
+  max-width: min(420px, calc(100vw - 40px));
+  padding: 11px 14px;
+  border: 1px solid rgba(255, 247, 224, 0.54);
+  color: var(--cream);
+  background: rgba(10, 36, 43, 0.78);
+  box-shadow: 4px 4px 0 rgba(245, 200, 79, 0.78);
+  backdrop-filter: blur(7px);
+  pointer-events: auto;
+}
+
+.portrait-share span {
+  color: var(--yellow);
+}
+
+.portrait-share:hover,
+.portrait-share:focus-visible {
+  color: var(--yellow);
+  border-color: var(--yellow);
+}
+
+.share-button span {
+  color: var(--coral);
+  font-size: 17px;
+}
+
+.share-button:hover,
+.share-button:focus-visible {
+  color: var(--coral);
+  border-color: var(--coral);
+  outline: none;
+  transform: translateX(3px);
+}
+
+.share-toast {
+  position: fixed;
+  z-index: 40;
+  top: 76px;
+  left: 50%;
+  min-width: 190px;
+  padding: 13px 20px;
+  border: 2px solid var(--ink);
+  color: var(--ink);
+  background: var(--mint);
+  box-shadow: 6px 6px 0 var(--ink);
+  font-size: 14px;
+  font-weight: 900;
+  text-align: center;
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+.share-toast.is-error {
+  background: var(--coral);
+  color: white;
+}
+
+.share-toast.animate {
+  animation: share-toast-in 2.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
 .game-button {
   position: relative;
   display: inline-flex;
@@ -991,6 +1075,32 @@ kbd {
   pointer-events: none;
 }
 
+.interaction-hint {
+  position: absolute;
+  z-index: 13;
+  top: clamp(72px, 10vh, 104px);
+  left: 50%;
+  padding: 11px 18px;
+  border: 2px solid var(--ink);
+  color: var(--ink);
+  background: var(--cream);
+  box-shadow: 5px 5px 0 var(--yellow);
+  font-size: clamp(14px, 1.5vw, 18px);
+  font-weight: 950;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  transform: translateX(-50%);
+  animation: hint-breathe 1.8s ease-in-out infinite;
+}
+
+.interaction-hint.is-punch {
+  box-shadow: 5px 5px 0 var(--coral);
+}
+
+.interaction-hint.is-pet {
+  box-shadow: 5px 5px 0 var(--mint);
+}
+
 .interaction-actions {
   position: absolute;
   right: 34px;
@@ -1278,6 +1388,17 @@ body.custom-cursor * {
   from { opacity: 0; }
 }
 
+@keyframes share-toast-in {
+  0% { opacity: 0; transform: translate(-50%, -12px) scale(0.96); }
+  12%, 82% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -7px) scale(0.98); }
+}
+
+@keyframes hint-breathe {
+  0%, 100% { transform: translateX(-50%) translateY(0); }
+  50% { transform: translateX(-50%) translateY(-4px); }
+}
+
 @media (max-width: 760px) {
   .audio-toggle {
     top: 14px;
@@ -1319,6 +1440,33 @@ body.custom-cursor * {
   .dialogue-card p {
     margin-bottom: 18px;
     font-size: 20px;
+  }
+
+  .share-button {
+    max-width: 100%;
+    font-size: 11px;
+  }
+
+  .portrait-share {
+    left: 14px;
+    bottom: max(14px, env(safe-area-inset-bottom));
+    max-width: calc(100vw - 28px);
+    padding: 9px 11px;
+  }
+
+  .share-toast {
+    top: 66px;
+    width: max-content;
+    max-width: calc(100vw - 36px);
+  }
+
+  .interaction-hint {
+    top: 68px;
+    max-width: calc(100vw - 32px);
+    padding: 9px 13px;
+    font-size: 13px;
+    white-space: normal;
+    text-align: center;
   }
 
   .task-panel {
@@ -1412,7 +1560,7 @@ body.custom-cursor * {
 
   .interaction-actions {
     right: 18px;
-    bottom: 22px;
+    bottom: 78px;
   }
 }
 
