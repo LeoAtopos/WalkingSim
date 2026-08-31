@@ -5,14 +5,22 @@ import {
   SPEECH_CONTINUE_DELAY,
   STRONG_COLLISION_SPEED_GAP,
   TASK_DURATION,
+  type ChallengeLevelId,
+  type ChallengeState,
+  type ChallengeUpgradeKey,
   type CollisionSide,
   type GameState,
+  type LevelId,
+  type MetaProgress,
   type SpeedDefinition,
   type WalkerState,
 } from './types';
+import { CHALLENGE_UI, getChallengeStats, getLevel } from './challenges';
 import { COPY } from './i18n';
 
 const NPC_COLORS = [0xe96b5e, 0xf0ad4e, 0x59a884, 0x7658a5, 0xd97ea8, 0x426f9e, 0xc98e56];
+const META_STORAGE_KEY = 'walking-sim-roguelike-v1';
+export const NPC_COUNT = 84;
 
 function seededUnit(seed: number): number {
   const value = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
@@ -20,21 +28,18 @@ function seededUnit(seed: number): number {
 }
 
 export function randomStreetX(seed: number): number {
-  // A high-power curve makes the centre visibly crowded while preserving a
-  // small chance of walkers appearing near either edge of the road.
   const signed = seededUnit(seed) * 2 - 1;
   return Math.sign(signed) * Math.pow(Math.abs(signed), 6) * 4.05;
 }
 
 function makeWalker(index: number): WalkerState {
-  // Most walkers use the full street width; a few naturally pass near the
-  // player's route so the crowd still produces regular encounters.
   const targetX = index % 7 === 1
     ? (seededUnit(index * 2.31 + 0.8) - 0.5) * 0.75
     : randomStreetX(index * 3.71 + 1.4);
-  const ahead = index < 20;
-  const zJitter = seededUnit(index * 5.17 + 2.2) * 2.8;
-  const z = ahead ? -4.5 - index * 4.1 - zJitter : 6.5 + (index - 20) * 5.3 + zJitter;
+  const ahead = index < 60;
+  const localIndex = ahead ? index : index - 60;
+  const zJitter = seededUnit(index * 5.17 + 2.2) * 0.9;
+  const z = ahead ? -4.5 - localIndex * 1.55 - zJitter : 6.5 + localIndex * 2.1 + zJitter;
   const speedUnit = seededUnit(index * 11.83 + 4.6);
   return {
     id: `npc-${index}`,
@@ -60,6 +65,64 @@ function freshTasks(): GameState['tasks'] {
   };
 }
 
+function freshMeta(): MetaProgress {
+  return {
+    completed: { 1: false, 2: false, 3: false },
+    attempts: { 1: 0, 2: 0, 3: 0 },
+    upgrades: {
+      1: { response: 0, lateral: 0 },
+      2: { maxSpeed: 0, power: 0 },
+      3: { mood: 0, guard: 0 },
+    },
+  };
+}
+
+function loadMeta(): MetaProgress {
+  const fallback = freshMeta();
+  try {
+    const parsed = JSON.parse(localStorage.getItem(META_STORAGE_KEY) ?? 'null') as Partial<MetaProgress> | null;
+    if (!parsed) return fallback;
+    ([1, 2, 3] as ChallengeLevelId[]).forEach((level) => {
+      fallback.completed[level] = Boolean(parsed.completed?.[level]);
+      fallback.attempts[level] = 0;
+    });
+    fallback.upgrades[1].response = Math.max(0, Number(parsed.upgrades?.[1]?.response) || 0);
+    fallback.upgrades[1].lateral = Math.max(0, Number(parsed.upgrades?.[1]?.lateral) || 0);
+    fallback.upgrades[2].maxSpeed = Math.max(0, Number(parsed.upgrades?.[2]?.maxSpeed) || 0);
+    fallback.upgrades[2].power = Math.max(0, Number(parsed.upgrades?.[2]?.power) || 0);
+    fallback.upgrades[3].mood = Math.max(0, Number(parsed.upgrades?.[3]?.mood) || 0);
+    fallback.upgrades[3].guard = Math.max(0, Number(parsed.upgrades?.[3]?.guard) || 0);
+  } catch {
+    // A fresh run is still playable when storage is unavailable or malformed.
+  }
+  return fallback;
+}
+
+function freshChallenge(): ChallengeState {
+  return {
+    level: null,
+    time: 0,
+    timeLimit: 20,
+    distance: 0,
+    finishDistance: 0,
+    targetSpeed: 0,
+    currentSpeed: 0,
+    minSpeed: 0,
+    maxSpeed: 0,
+    speedResponse: 0,
+    lateralSpeed: 0,
+    speedInput: 0,
+    lateralInput: 0,
+    mood: 0,
+    maxMood: 0,
+    hitDamage: 0,
+    hitCount: 0,
+    invulnerableTime: 0,
+    resultReason: '',
+    lastUpgrade: null,
+  };
+}
+
 export class WalkingSimulation {
   state: GameState;
 
@@ -70,20 +133,15 @@ export class WalkingSimulation {
   private createState(): GameState {
     return {
       mode: 'intro',
+      selectedLevel: null,
+      meta: loadMeta(),
+      challenge: freshChallenge(),
       speedLevel: 2,
       player: {
-        id: 'player',
-        x: 0,
-        targetX: 0,
-        z: 0,
-        speed: SPEEDS[2].value,
-        color: 0x287dd8,
-        phase: 0,
-        scale: 1,
-        avoidanceTime: 0,
-        recycles: 0,
+        id: 'player', x: 0, targetX: 0, z: 0, speed: SPEEDS[2].value,
+        color: 0x287dd8, phase: 0, scale: 1, avoidanceTime: 0, recycles: 0,
       },
-      npcs: Array.from({ length: 28 }, (_, index) => makeWalker(index)),
+      npcs: Array.from({ length: NPC_COUNT }, (_, index) => makeWalker(index)),
       tasks: freshTasks(),
       speech: null,
       speechQueue: [],
@@ -104,15 +162,164 @@ export class WalkingSimulation {
     };
   }
 
+  private saveMeta(): void {
+    try {
+      localStorage.setItem(META_STORAGE_KEY, JSON.stringify({
+        completed: this.state.meta.completed,
+        upgrades: this.state.meta.upgrades,
+      }));
+    } catch {
+      // Progress remains valid for the current session when storage is blocked.
+    }
+  }
+
   reset(): void {
     this.state = this.createState();
   }
 
   startWalking(): void {
     if (this.state.mode !== 'intro') return;
+    this.state.mode = 'level-select';
+    this.state.player.speed = 0;
+  }
+
+  isLevelFourUnlocked(): boolean {
+    return ([1, 2, 3] as ChallengeLevelId[]).every((level) => this.state.meta.completed[level]);
+  }
+
+  selectLevel(level: LevelId): void {
+    if (this.state.mode !== 'level-select') return;
+    if (level === 4) {
+      if (!this.isLevelFourUnlocked()) return;
+      this.startLegacyWalk();
+      return;
+    }
+    this.state.selectedLevel = level;
+    this.configureChallenge(level);
+    this.state.mode = 'level-briefing';
+  }
+
+  beginChallenge(): void {
+    const level = this.state.challenge.level;
+    if (this.state.mode !== 'level-briefing' || !level) return;
+    this.configureChallenge(level);
+    this.state.meta.attempts[level] += 1;
+    this.state.mode = 'challenge';
+  }
+
+  returnToLevelSelect(): void {
+    const level = this.state.challenge.level;
+    if (level) this.state.meta.attempts[level] = 0;
+    this.state.mode = 'level-select';
+    this.state.selectedLevel = null;
+    this.state.challenge.speedInput = 0;
+    this.state.challenge.lateralInput = 0;
+    this.state.player.speed = 0;
+    this.state.impactTime = 0;
+    this.state.impactTextTime = 0;
+    this.saveMeta();
+  }
+
+  chooseUpgrade(key: ChallengeUpgradeKey): void {
+    const level = this.state.challenge.level;
+    if (this.state.mode !== 'upgrade' || !level || !getLevel(level).upgrades.includes(key)) return;
+    const upgrades = this.state.meta.upgrades[level] as Partial<Record<ChallengeUpgradeKey, number>>;
+    upgrades[key] = (upgrades[key] ?? 0) + 1;
+    this.saveMeta();
+    this.configureChallenge(level, key);
+    this.state.mode = 'level-briefing';
+  }
+
+  finishVictory(): void {
+    if (this.state.mode !== 'victory') return;
+    this.returnToLevelSelect();
+  }
+
+  setChallengeInput(axis: 'speed' | 'lateral', value: -1 | 0 | 1): void {
+    if (this.state.mode !== 'challenge') return;
+    if (axis === 'speed') this.state.challenge.speedInput = value;
+    else this.state.challenge.lateralInput = value;
+  }
+
+  private configureChallenge(level: ChallengeLevelId, lastUpgrade: ChallengeUpgradeKey | null = null): void {
+    const stats = getChallengeStats(this.state.meta, level);
+    const initialSpeed = 0;
+    this.state.challenge = {
+      ...freshChallenge(),
+      level,
+      finishDistance: stats.finishDistance,
+      targetSpeed: initialSpeed,
+      currentSpeed: initialSpeed,
+      minSpeed: stats.minSpeed,
+      maxSpeed: stats.maxSpeed,
+      speedResponse: stats.response,
+      lateralSpeed: stats.lateral,
+      mood: stats.maxMood,
+      maxMood: stats.maxMood,
+      hitDamage: stats.hitDamage,
+      lastUpgrade,
+    };
+    this.state.player.x = 0;
+    this.state.player.targetX = 0;
+    this.state.player.z = 0;
+    this.state.player.speed = initialSpeed;
+    this.state.distance = 0;
+    this.state.elapsed = 0;
+    this.state.impactTime = 0;
+    this.state.impactTextTime = 0;
+    this.state.impactLabel = '';
+    this.state.minorBumps = 0;
+    this.state.strongCollisions = 0;
+    this.configureChallengeCrowd(level);
+  }
+
+  private configureChallengeCrowd(level: ChallengeLevelId): void {
+    const laneSets = {
+      1: [0, -1.85, 1.85, 0.9, -0.9, 2.65, -2.65],
+      2: [0, 0.55, -0.55, 1.7, -1.7, 2.8, -2.8],
+      3: [0, 0.38, -0.38, 1.55, -1.55, 2.65, -2.65],
+    } as const;
+    this.state.npcs.forEach((npc, index) => {
+      const aheadCount = level === 1 ? 66 : level === 2 ? 72 : 42;
+      const ahead = index < aheadCount;
+      const localIndex = ahead ? index : index - aheadCount;
+      const lane = laneSets[level][localIndex % laneSets[level].length];
+      npc.x = lane;
+      npc.targetX = lane;
+      npc.avoidanceTime = 0;
+      npc.recycles = 0;
+      if (level === 1) {
+        npc.z = ahead ? -12 - localIndex * 3.05 : 12 + localIndex * 4.2;
+        npc.speed = 6.8 + (index % 5) * 1.35;
+      } else if (level === 2) {
+        npc.z = ahead ? -5.5 - localIndex * 2.9 : 12 + localIndex * 4.4;
+        npc.speed = 8.2 + (index % 6) * 1.2;
+      } else {
+        npc.z = ahead ? -4.5 - localIndex * 3.25 : 10 + localIndex * 3.6;
+        npc.speed = ahead ? 4.8 + (index % 5) * 1.1 : 10.8 + (index % 5) * 1.05;
+      }
+    });
+  }
+
+  private startLegacyWalk(): void {
+    this.state.selectedLevel = 4;
     this.state.mode = 'walking';
     this.state.speedLevel = 2;
+    this.state.player.x = 0;
+    this.state.player.targetX = 0;
+    this.state.player.z = 0;
     this.state.player.speed = SPEEDS[2].value;
+    this.state.tasks = freshTasks();
+    this.state.speech = null;
+    this.state.speechQueue = [];
+    this.state.pendingEvaluation = null;
+    this.state.selectedEvaluations = {};
+    this.state.allTasksComplete = false;
+    this.state.distance = 0;
+    this.state.elapsed = 0;
+    this.state.minorBumps = 0;
+    this.state.strongCollisions = 0;
+    this.state.npcs.forEach((npc, index) => Object.assign(npc, makeWalker(index)));
   }
 
   setSpeedLevel(level: number): void {
@@ -176,6 +383,10 @@ export class WalkingSimulation {
   }
 
   registerCollision(relativeSpeed: number, npcId?: string, side: CollisionSide = 'ahead'): void {
+    if (this.state.mode === 'challenge') {
+      this.registerChallengeCollision(relativeSpeed, npcId);
+      return;
+    }
     if (this.state.mode !== 'walking') return;
     if (npcId) this.startNpcAvoidance(npcId, relativeSpeed);
     if (relativeSpeed >= STRONG_COLLISION_SPEED_GAP) {
@@ -195,12 +406,35 @@ export class WalkingSimulation {
     }
   }
 
+  private registerChallengeCollision(relativeSpeed: number, npcId?: string): void {
+    const challenge = this.state.challenge;
+    if (!challenge.level || challenge.invulnerableTime > 0) return;
+    if (npcId) this.startNpcAvoidance(npcId, relativeSpeed);
+    challenge.hitCount += 1;
+    challenge.invulnerableTime = 0.72;
+    this.state.strongCollisions += 1;
+    this.state.impactTime = 0.62;
+    this.state.impactTextTime = 1.2;
+    this.state.impactStrength = 0.82;
+    if (challenge.level === 1) {
+      this.failChallenge(CHALLENGE_UI.reasons.touched);
+      return;
+    }
+    if (challenge.level === 2) {
+      challenge.currentSpeed = Math.max(challenge.minSpeed, challenge.currentSpeed - challenge.hitDamage);
+      this.state.player.speed = challenge.currentSpeed;
+      this.state.impactLabel = `−${challenge.hitDamage.toFixed(1)} m/s`;
+      return;
+    }
+    challenge.mood = Math.max(0, challenge.mood - challenge.hitDamage);
+    this.state.impactLabel = `−${Math.round(challenge.hitDamage)}`;
+    if (challenge.mood <= 0) this.failChallenge(CHALLENGE_UI.reasons.cried);
+  }
+
   private startNpcAvoidance(npcId: string, relativeSpeed: number): void {
     const npc = this.state.npcs.find((walker) => walker.id === npcId);
     if (!npc) return;
-
     const duration = relativeSpeed >= STRONG_COLLISION_SPEED_GAP ? 3.25 : 2.45;
-
     const idNumber = Number(npc.id.split('-')[1]) || 0;
     const continuingDirection = Math.sign(npc.targetX - npc.x);
     let direction = npc.avoidanceTime > 0.2 && continuingDirection !== 0
@@ -209,9 +443,7 @@ export class WalkingSimulation {
       ? Math.sign(npc.x - this.state.player.x)
       : (idNumber % 2 === 0 ? -1 : 1);
     const sideStep = relativeSpeed >= STRONG_COLLISION_SPEED_GAP ? 3.05 : 2.15;
-    if (npc.x + direction * sideStep > 4.15 || npc.x + direction * sideStep < -4.15) {
-      direction *= -1;
-    }
+    if (npc.x + direction * sideStep > 4.15 || npc.x + direction * sideStep < -4.15) direction *= -1;
     npc.targetX = Math.max(-4.15, Math.min(4.15, npc.x + direction * sideStep));
     npc.avoidanceTime = Math.max(npc.avoidanceTime, duration);
   }
@@ -226,8 +458,55 @@ export class WalkingSimulation {
     state.impactTime = Math.max(0, state.impactTime - dt);
     state.impactTextTime = Math.max(0, state.impactTextTime - dt);
     if (state.impactTime === 0 && state.impactTextTime === 0) state.impactStrength = 0;
-
+    if (state.mode === 'challenge') this.updateChallenge(dt);
     if (state.mode === 'walking') this.updateWalking(dt);
+  }
+
+  private updateChallenge(dt: number): void {
+    const challenge = this.state.challenge;
+    if (!challenge.level) return;
+    challenge.time = Math.min(challenge.timeLimit, challenge.time + dt);
+    challenge.invulnerableTime = Math.max(0, challenge.invulnerableTime - dt);
+    const targetAdjustRate = challenge.level === 2 ? 16 : 7.5;
+    challenge.targetSpeed = Math.max(
+      challenge.minSpeed,
+      Math.min(challenge.maxSpeed, challenge.targetSpeed + challenge.speedInput * targetAdjustRate * dt),
+    );
+    const delta = challenge.targetSpeed - challenge.currentSpeed;
+    const change = Math.sign(delta) * Math.min(Math.abs(delta), challenge.speedResponse * dt);
+    challenge.currentSpeed += change;
+    this.state.player.speed = challenge.currentSpeed;
+    challenge.distance += challenge.currentSpeed * dt;
+    this.state.distance = challenge.distance;
+    this.state.npcs.forEach((npc) => { npc.avoidanceTime = Math.max(0, npc.avoidanceTime - dt); });
+
+    if (challenge.level === 1 && challenge.time >= challenge.timeLimit) {
+      this.winChallenge();
+    } else if (challenge.level === 2) {
+      if (challenge.distance >= challenge.finishDistance) this.winChallenge();
+      else if (challenge.time >= challenge.timeLimit) this.failChallenge(CHALLENGE_UI.reasons.timeout);
+    } else if (challenge.level === 3) {
+      if (challenge.distance >= challenge.finishDistance) this.failChallenge(CHALLENGE_UI.reasons.arrivedEarly);
+      else if (challenge.time >= challenge.timeLimit) this.winChallenge();
+    }
+  }
+
+  private failChallenge(reason: string): void {
+    if (this.state.mode !== 'challenge') return;
+    this.state.challenge.resultReason = reason;
+    this.state.challenge.speedInput = 0;
+    this.state.challenge.lateralInput = 0;
+    this.state.mode = 'upgrade';
+  }
+
+  private winChallenge(): void {
+    const level = this.state.challenge.level;
+    if (this.state.mode !== 'challenge' || !level) return;
+    this.state.meta.completed[level] = true;
+    this.saveMeta();
+    this.state.challenge.speedInput = 0;
+    this.state.challenge.lateralInput = 0;
+    this.state.mode = 'victory';
   }
 
   private updateWalking(dt: number): void {
@@ -235,15 +514,10 @@ export class WalkingSimulation {
     const speed = SPEEDS[state.speedLevel];
     state.player.speed = speed.value;
     state.distance += speed.value * dt;
-    state.npcs.forEach((npc) => {
-      npc.avoidanceTime = Math.max(0, npc.avoidanceTime - dt);
-    });
+    state.npcs.forEach((npc) => { npc.avoidanceTime = Math.max(0, npc.avoidanceTime - dt); });
     SPEEDS.forEach((definition) => {
-      if (definition.id !== speed.id && !state.tasks[definition.id].complete) {
-        state.tasks[definition.id].progress = 0;
-      }
+      if (definition.id !== speed.id && !state.tasks[definition.id].complete) state.tasks[definition.id].progress = 0;
     });
-
     const task = state.tasks[speed.id];
     if (!task.complete) {
       task.progress = Math.min(TASK_DURATION, task.progress + dt);
@@ -256,7 +530,6 @@ export class WalkingSimulation {
         state.pendingEvaluation = speed.id;
       }
     }
-
     state.allTasksComplete = SPEEDS.every((definition) => state.tasks[definition.id].complete);
   }
 

@@ -121,16 +121,21 @@ export class GameAudio {
     this.lastStrongCollisions = state.strongCollisions;
     this.lastMinorBumps = state.minorBumps;
 
-    if (state.mode !== 'walking' || state.speech || state.pendingEvaluation || state.speedLevel === 0) {
+    const challengeWalking = state.mode === 'challenge' && state.challenge.currentSpeed > 0;
+    const legacyWalking = state.mode === 'walking' && !state.speech && !state.pendingEvaluation && state.speedLevel > 0;
+    if (!challengeWalking && !legacyWalking) {
       this.footstepClock = 0;
       return;
     }
 
     this.footstepClock += Math.min(dt, 0.05);
-    const interval = 0.66 - (state.speedLevel / (SPEEDS.length - 1)) * 0.46;
+    const paceRatio = challengeWalking
+      ? Math.min(1, state.challenge.currentSpeed / Math.max(1, state.challenge.maxSpeed))
+      : state.speedLevel / (SPEEDS.length - 1);
+    const interval = 0.66 - paceRatio * 0.46;
     if (this.footstepClock >= interval) {
       this.footstepClock %= interval;
-      this.playFootstep(state.speedLevel);
+      this.playFootstep(challengeWalking ? paceRatio * 4 : state.speedLevel);
     }
   }
 
@@ -395,6 +400,11 @@ export class GameAudio {
     if (!this.context || !this.musicGain || !this.ambienceGain) return;
     const mix: Record<GameMode, { music: number; ambience: number }> = {
       intro: { music: 0.3, ambience: 0.025 },
+      'level-select': { music: 0.32, ambience: 0.025 },
+      'level-briefing': { music: 0.31, ambience: 0.1 },
+      challenge: { music: 0.42, ambience: 0.2 },
+      upgrade: { music: 0.2, ambience: 0.08 },
+      victory: { music: 0.46, ambience: 0.1 },
       walking: { music: 0.38, ambience: 0.18 },
       return: { music: 0.28, ambience: 0.018 },
       interaction: { music: 0.22, ambience: 0.01 },

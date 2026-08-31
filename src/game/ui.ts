@@ -1,8 +1,15 @@
-import { INTERACTION_TARGET, SPEEDS, SPEECH_CONTINUE_DELAY, TASK_DURATION, type GameState, type InteractionKind } from './types';
+import { INTERACTION_TARGET, SPEEDS, SPEECH_CONTINUE_DELAY, TASK_DURATION, type ChallengeUpgradeKey, type GameState, type InteractionKind, type LevelId } from './types';
 import { COPY, LANGUAGE, setLanguagePreference } from './i18n';
+import { CHALLENGE_UI, LEVELS, getChallengeStats, getLevel, getUpgradeCopy, getUpgradeLevel, localized } from './challenges';
 
 interface UIActions {
   onStart: () => void;
+  onSelectLevel: (level: LevelId) => void;
+  onBeginChallenge: () => void;
+  onChooseUpgrade: (key: ChallengeUpgradeKey) => void;
+  onReturnToLevels: () => void;
+  onFinishVictory: () => void;
+  onChallengeInput: (axis: 'speed' | 'lateral', value: -1 | 0 | 1) => void;
   onSpeedChange: (delta: number) => void;
   onDismissSpeech: () => void;
   onChooseEvaluation: (choiceIndex: number) => void;
@@ -22,6 +29,15 @@ const SHARE_URL = 'https://leoatopos.github.io/WalkingSim/';
 export class GameUI {
   private readonly root: HTMLDivElement;
   private readonly walkingHud: HTMLElement;
+  private readonly levelSelectScreen: HTMLElement;
+  private readonly briefingScreen: HTMLElement;
+  private readonly challengeHud: HTMLElement;
+  private readonly upgradeScreen: HTMLElement;
+  private readonly victoryScreen: HTMLElement;
+  private readonly levelGrid: HTMLElement;
+  private readonly briefingContent: HTMLElement;
+  private readonly upgradeChoices: HTMLElement;
+  private readonly challengeImpactText: HTMLElement;
   private readonly taskPanel: HTMLElement;
   private readonly taskCompleteArt: HTMLElement;
   private readonly introScreen: HTMLElement;
@@ -61,6 +77,8 @@ export class GameUI {
   private speechCanContinue = false;
   private lastPendingEvaluation: GameState['pendingEvaluation'] = null;
   private shareToastTimeout = 0;
+  private lastUpgradeRenderKey = '';
+  private lastBriefingRenderKey = '';
 
   constructor(container: HTMLElement, private readonly actions: UIActions) {
     this.root = document.createElement('div');
@@ -82,6 +100,74 @@ export class GameUI {
           <div class="dialogue-speaker">${COPY.characterName}</div>
           <p>${COPY.intro.line1}<br />${COPY.intro.line2}</p>
           <button id="start-btn" class="game-button primary-button">${COPY.intro.start} <span>→</span></button>
+        </div>
+      </section>
+
+      <section id="level-select-screen" class="scene-ui level-select-ui is-hidden" aria-label="${CHALLENGE_UI.selectTitle}">
+        <div class="level-select-heading">
+          <span class="eyebrow">${CHALLENGE_UI.selectKicker}</span>
+          <h1>${CHALLENGE_UI.selectTitle}</h1>
+          <p>${CHALLENGE_UI.selectBody}</p>
+          <div class="level-clear-count"><span>${CHALLENGE_UI.clearCount}</span><strong id="level-clear-count">0 / 3</strong></div>
+        </div>
+        <div id="level-grid" class="level-grid"></div>
+      </section>
+
+      <section id="briefing-screen" class="scene-ui briefing-ui is-hidden" aria-label="${CHALLENGE_UI.briefingKicker}">
+        <div id="briefing-content" class="briefing-card"></div>
+        <div class="briefing-actions">
+          <button id="briefing-back" class="text-button" type="button">← ${CHALLENGE_UI.back}</button>
+          <button id="begin-challenge" class="game-button primary-button" type="button">${CHALLENGE_UI.start} <span>→</span></button>
+        </div>
+      </section>
+
+      <section id="challenge-hud" class="scene-ui challenge-ui is-hidden" aria-label="${CHALLENGE_UI.run}">
+        <div class="challenge-objective">
+          <span id="challenge-level-index">LEVEL 01</span>
+          <strong id="challenge-title"></strong>
+          <small id="challenge-objective"></small>
+        </div>
+        <div class="challenge-timer"><strong id="challenge-time">20.0</strong><span>${CHALLENGE_UI.seconds}</span></div>
+        <div class="challenge-progress"><i id="challenge-progress-fill"></i></div>
+        <div class="challenge-stats">
+          <div><span>${CHALLENGE_UI.distance}</span><strong><b id="challenge-distance">0</b> ${CHALLENGE_UI.meters}</strong></div>
+          <div><span>${CHALLENGE_UI.currentSpeed}</span><strong><b id="challenge-current-speed">0.0</b> m/s</strong></div>
+          <div><span>${CHALLENGE_UI.targetSpeed}</span><strong><b id="challenge-target-speed">0.0</b> m/s</strong></div>
+          <div><span>${CHALLENGE_UI.hits}</span><strong id="challenge-hits">0</strong></div>
+        </div>
+        <div id="mood-meter" class="mood-meter is-hidden">
+          <div><span>${CHALLENGE_UI.mood}</span><strong id="mood-value">0 / 0</strong></div>
+          <em><i id="mood-fill"></i></em>
+        </div>
+        <div id="rear-warning" class="rear-warning is-hidden">↓ ${CHALLENGE_UI.rearWarning}</div>
+        <div class="challenge-control-hint"><kbd>W</kbd><kbd>S</kbd> ${CHALLENGE_UI.targetSpeed} · <kbd>A</kbd><kbd>D</kbd> ${CHALLENGE_UI.lateral}</div>
+        <div class="challenge-touch-controls">
+          <button type="button" data-challenge-axis="lateral" data-challenge-value="-1">←<span>${CHALLENGE_UI.left}</span></button>
+          <button type="button" data-challenge-axis="speed" data-challenge-value="-1">−<span>${CHALLENGE_UI.slower}</span></button>
+          <button type="button" data-challenge-axis="speed" data-challenge-value="1">＋<span>${CHALLENGE_UI.faster}</span></button>
+          <button type="button" data-challenge-axis="lateral" data-challenge-value="1">→<span>${CHALLENGE_UI.right}</span></button>
+        </div>
+        <div id="challenge-impact-text" class="impact-text is-hidden" aria-live="polite"></div>
+      </section>
+
+      <section id="upgrade-screen" class="scene-ui run-result-ui is-hidden" aria-label="${CHALLENGE_UI.failKicker}">
+        <div class="run-result-card fail-card">
+          <span class="eyebrow">${CHALLENGE_UI.failKicker}</span>
+          <h2>${CHALLENGE_UI.failTitle}</h2>
+          <p id="failure-reason"></p>
+          <small>${CHALLENGE_UI.chooseUpgrade}</small>
+          <div id="upgrade-choices" class="upgrade-choices"></div>
+          <button id="upgrade-back" class="text-button" type="button">← ${CHALLENGE_UI.back}</button>
+        </div>
+      </section>
+
+      <section id="victory-screen" class="scene-ui run-result-ui is-hidden" aria-label="${CHALLENGE_UI.victoryKicker}">
+        <div class="run-result-card victory-card">
+          <span class="eyebrow">${CHALLENGE_UI.victoryKicker}</span>
+          <h2>${CHALLENGE_UI.victoryTitle}</h2>
+          <p id="victory-summary"></p>
+          <div id="unlock-notice" class="unlock-notice is-hidden">✦ ${CHALLENGE_UI.allUnlocked}</div>
+          <button id="victory-back" class="game-button primary-button" type="button">${CHALLENGE_UI.victoryBack} <span>→</span></button>
         </div>
       </section>
 
@@ -189,6 +275,15 @@ export class GameUI {
     container.append(this.root);
 
     this.walkingHud = this.getElement('walking-hud');
+    this.levelSelectScreen = this.getElement('level-select-screen');
+    this.briefingScreen = this.getElement('briefing-screen');
+    this.challengeHud = this.getElement('challenge-hud');
+    this.upgradeScreen = this.getElement('upgrade-screen');
+    this.victoryScreen = this.getElement('victory-screen');
+    this.levelGrid = this.getElement('level-grid');
+    this.briefingContent = this.getElement('briefing-content');
+    this.upgradeChoices = this.getElement('upgrade-choices');
+    this.challengeImpactText = this.getElement('challenge-impact-text');
     this.taskPanel = this.getElement('task-panel');
     this.taskCompleteArt = this.getElement('task-complete-art');
     this.introScreen = this.getElement('intro-screen');
@@ -222,6 +317,7 @@ export class GameUI {
     this.shareToast = this.getElement('share-toast');
     this.shareButton = this.getElement('portrait-share') as HTMLButtonElement;
 
+    this.createLevelCards();
     this.createTaskRows();
     this.createSpeedDots();
     this.bindEvents();
@@ -232,6 +328,26 @@ export class GameUI {
     const element = this.root.querySelector<HTMLElement>(`#${id}`);
     if (!element) throw new Error(`Missing UI element #${id}`);
     return element;
+  }
+
+  private createLevelCards(): void {
+    LEVELS.forEach((level) => {
+      const card = document.createElement('button');
+      card.id = `level-card-${level.id}`;
+      card.className = `level-card level-card-${level.id}`;
+      card.type = 'button';
+      card.dataset.level = String(level.id);
+      card.style.setProperty('--level-accent', level.accent);
+      card.innerHTML = `
+        <span class="level-number">0${level.id}</span>
+        <span class="level-state"></span>
+        <strong>${localized(level.title)}</strong>
+        <em>${localized(level.subtitle)}</em>
+        <p>${localized(level.rule)}</p>
+        <div class="level-card-meta"><span class="level-attempts"></span><b>→</b></div>
+      `;
+      this.levelGrid.append(card);
+    });
   }
 
   private createTaskRows(): void {
@@ -267,6 +383,33 @@ export class GameUI {
 
   private bindEvents(): void {
     this.getElement('start-btn').addEventListener('click', this.actions.onStart);
+    this.levelGrid.addEventListener('click', (event) => {
+      const card = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-level]');
+      if (!card || card.disabled) return;
+      this.actions.onSelectLevel(Number(card.dataset.level) as LevelId);
+    });
+    this.getElement('begin-challenge').addEventListener('click', this.actions.onBeginChallenge);
+    this.getElement('briefing-back').addEventListener('click', this.actions.onReturnToLevels);
+    this.getElement('upgrade-back').addEventListener('click', this.actions.onReturnToLevels);
+    this.getElement('victory-back').addEventListener('click', this.actions.onFinishVictory);
+    this.upgradeChoices.addEventListener('click', (event) => {
+      const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-upgrade]');
+      if (button?.dataset.upgrade) this.actions.onChooseUpgrade(button.dataset.upgrade as ChallengeUpgradeKey);
+    });
+    this.root.querySelectorAll<HTMLButtonElement>('[data-challenge-axis]').forEach((button) => {
+      const axis = button.dataset.challengeAxis as 'speed' | 'lateral';
+      const value = Number(button.dataset.challengeValue) as -1 | 1;
+      const start = (event: PointerEvent) => {
+        event.preventDefault();
+        button.setPointerCapture?.(event.pointerId);
+        this.actions.onChallengeInput(axis, value);
+      };
+      const stop = () => this.actions.onChallengeInput(axis, 0);
+      button.addEventListener('pointerdown', start);
+      button.addEventListener('pointerup', stop);
+      button.addEventListener('pointercancel', stop);
+      button.addEventListener('lostpointercapture', stop);
+    });
     this.getElement('language-zh').addEventListener('click', () => setLanguagePreference('zh-CN'));
     this.getElement('language-en').addEventListener('click', () => setLanguagePreference('en'));
     this.shareButton.addEventListener('click', () => void this.copyShareLink());
@@ -387,6 +530,9 @@ export class GameUI {
     if ((state.mode === 'intro' || state.mode === 'return') && portraitScreen.visible) {
       this.positionNearCharacter(state.mode === 'intro' ? this.introDialogue : this.returnDialogue, portraitScreen, 'portrait');
     }
+    if (['level-select', 'level-briefing', 'challenge', 'upgrade', 'victory'].includes(state.mode)) {
+      this.updateChallengeFlow(state);
+    }
     if (state.mode === 'walking') this.updateWalking(state, playerScreen);
     if (state.mode === 'interaction') this.updateInteraction(state);
   }
@@ -396,12 +542,18 @@ export class GameUI {
     if (state.mode === 'intro' || state.mode === 'return') this.lastInteractionCount = 0;
     const screens: Array<[HTMLElement, boolean]> = [
       [this.introScreen, state.mode === 'intro'],
+      [this.levelSelectScreen, state.mode === 'level-select'],
+      [this.briefingScreen, state.mode === 'level-briefing'],
+      [this.challengeHud, state.mode === 'challenge'],
+      [this.upgradeScreen, state.mode === 'upgrade'],
+      [this.victoryScreen, state.mode === 'victory'],
       [this.walkingHud, state.mode === 'walking'],
       [this.returnScreen, state.mode === 'return'],
       [this.interactionScreen, state.mode === 'interaction'],
       [this.departedScreen, state.mode === 'departed'],
     ];
     screens.forEach(([element, visible]) => element.classList.toggle('is-hidden', !visible));
+    this.root.dataset.mode = state.mode;
     this.root.classList.toggle('is-interacting', state.mode === 'interaction');
     this.shareButton.classList.toggle('is-hidden', !['intro', 'return', 'interaction'].includes(state.mode));
     this.interactionUnlockAt = state.mode === 'interaction' ? performance.now() + 180 : 0;
@@ -415,6 +567,101 @@ export class GameUI {
       this.impactText.classList.add('is-hidden');
     }
     if (state.mode !== 'interaction') this.interactionBalloons.replaceChildren();
+    if (state.mode !== 'upgrade') this.lastUpgradeRenderKey = '';
+  }
+
+  private updateChallengeFlow(state: GameState): void {
+    const completedCount = ([1, 2, 3] as const).filter((level) => state.meta.completed[level]).length;
+    this.getElement('level-clear-count').textContent = `${completedCount} / 3`;
+    LEVELS.forEach((level) => {
+      const card = this.getElement(`level-card-${level.id}`) as HTMLButtonElement;
+      const locked = level.id === 4 && completedCount < 3;
+      const cleared = level.id !== 4 && state.meta.completed[level.id];
+      card.disabled = locked;
+      card.classList.toggle('is-locked', locked);
+      card.classList.toggle('is-cleared', cleared);
+      (card.querySelector('.level-state') as HTMLElement).textContent = locked
+        ? `${CHALLENGE_UI.locked} · ${completedCount}/3`
+        : cleared ? CHALLENGE_UI.cleared : CHALLENGE_UI.unlocked;
+      (card.querySelector('.level-attempts') as HTMLElement).textContent = level.id === 4
+        ? localized(level.objective)
+        : `${CHALLENGE_UI.attempt} ${state.meta.attempts[level.id]} ${CHALLENGE_UI.times}`;
+    });
+
+    const level = state.challenge.level;
+    if (!level) return;
+    const definition = getLevel(level);
+    const challenge = state.challenge;
+    const stats = getChallengeStats(state.meta, level);
+    const lastUpgrade = challenge.lastUpgrade ? getUpgradeCopy(challenge.lastUpgrade) : null;
+    const statLines = level === 1
+      ? [[CHALLENGE_UI.response, `${stats.response.toFixed(1)} m/s²`, state.meta.upgrades[1].response], [CHALLENGE_UI.lateral, `${stats.lateral.toFixed(2)} m/s`, state.meta.upgrades[1].lateral]]
+      : level === 2
+      ? [[CHALLENGE_UI.currentSpeed, `${stats.maxSpeed.toFixed(2)} m/s MAX`, state.meta.upgrades[2].maxSpeed], [getUpgradeCopy('power').name, `−${stats.hitDamage.toFixed(1)} m/s / HIT`, state.meta.upgrades[2].power]]
+      : [[CHALLENGE_UI.mood, `${stats.maxMood}`, state.meta.upgrades[3].mood], [getUpgradeCopy('guard').name, `−${stats.hitDamage.toFixed(0)} / HIT`, state.meta.upgrades[3].guard]];
+    const briefingRenderKey = `${level}:${statLines.flat().join(':')}:${challenge.lastUpgrade ?? ''}`;
+    if (this.lastBriefingRenderKey !== briefingRenderKey) {
+      this.lastBriefingRenderKey = briefingRenderKey;
+      this.briefingContent.style.setProperty('--level-accent', definition.accent);
+      this.briefingContent.innerHTML = `
+        <span class="eyebrow">${CHALLENGE_UI.briefingKicker} / 0${level}</span>
+        <h2>${localized(definition.title)}</h2>
+        <p>${localized(definition.rule)}</p>
+        <div class="briefing-goal"><span>${CHALLENGE_UI.target}</span><strong>${localized(definition.objective)}</strong></div>
+        <div class="briefing-stats">${statLines.map(([label, value, statLevel]) => `<div><span>${label}<em>LV.${statLevel}</em></span><strong>${value}</strong></div>`).join('')}</div>
+        ${lastUpgrade ? `<div class="last-upgrade">↑ ${lastUpgrade.name} · ${lastUpgrade.effect}</div>` : ''}
+        <small>${CHALLENGE_UI.controls}</small>
+      `;
+    }
+
+    this.getElement('failure-reason').textContent = challenge.resultReason;
+    const upgradeRenderKey = `${level}:${definition.upgrades.map((key) => getUpgradeLevel(state.meta, level, key)).join(':')}`;
+    if (state.mode === 'upgrade' && this.lastUpgradeRenderKey !== upgradeRenderKey) {
+      this.lastUpgradeRenderKey = upgradeRenderKey;
+      this.upgradeChoices.replaceChildren(...definition.upgrades.map((key) => {
+        const copy = getUpgradeCopy(key);
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.id = `upgrade-${key}`;
+        button.dataset.upgrade = key;
+        button.innerHTML = `<span>LV.${getUpgradeLevel(state.meta, level, key)}</span><strong>${copy.name}</strong><small>${copy.effect}</small><b>＋</b>`;
+        return button;
+      }));
+    }
+
+    this.getElement('victory-summary').textContent = `${localized(definition.title)} · ${CHALLENGE_UI.attempt} ${state.meta.attempts[level]} ${CHALLENGE_UI.times}`;
+    this.getElement('unlock-notice').classList.toggle('is-hidden', completedCount < 3);
+
+    this.getElement('challenge-level-index').textContent = `LEVEL 0${level}`;
+    this.getElement('challenge-title').textContent = localized(definition.title);
+    this.getElement('challenge-objective').textContent = localized(definition.objective);
+    this.getElement('challenge-time').textContent = Math.max(0, challenge.timeLimit - challenge.time).toFixed(1);
+    this.getElement('challenge-distance').textContent = challenge.distance.toFixed(0);
+    this.getElement('challenge-current-speed').textContent = challenge.currentSpeed.toFixed(1);
+    this.getElement('challenge-target-speed').textContent = challenge.targetSpeed.toFixed(1);
+    this.getElement('challenge-hits').textContent = String(challenge.hitCount);
+    const progress = level === 2
+      ? challenge.distance / Math.max(1, challenge.finishDistance)
+      : challenge.time / challenge.timeLimit;
+    (this.getElement('challenge-progress-fill') as HTMLElement).style.width = `${Math.min(100, progress * 100)}%`;
+    const moodMeter = this.getElement('mood-meter');
+    moodMeter.classList.toggle('is-hidden', level !== 3);
+    if (level === 3) {
+      this.getElement('mood-value').textContent = `${Math.ceil(challenge.mood)} / ${challenge.maxMood}`;
+      (this.getElement('mood-fill') as HTMLElement).style.width = `${Math.max(0, challenge.mood / challenge.maxMood) * 100}%`;
+    }
+    const rearThreat = level === 3 && state.mode === 'challenge' && state.npcs.some((npc) => {
+      const rearDistance = npc.z - state.player.z;
+      return rearDistance > 0 && rearDistance < 13 && Math.abs(npc.x - state.player.x) < 1.35;
+    });
+    this.getElement('rear-warning').classList.toggle('is-hidden', !rearThreat);
+    const showImpact = state.mode === 'challenge' && state.impactTime > 0;
+    const showImpactText = state.mode === 'challenge' && state.impactTextTime > 0 && Boolean(state.impactLabel);
+    this.impactFlash.classList.toggle('is-hidden', !showImpact);
+    this.impactFlash.classList.toggle('is-strong', showImpact);
+    this.challengeImpactText.classList.toggle('is-hidden', !showImpactText);
+    this.challengeImpactText.classList.toggle('is-strong', showImpactText);
+    this.challengeImpactText.textContent = state.impactLabel;
   }
 
   private updateWalking(state: GameState, playerScreen: { x: number; y: number; visible: boolean }): void {

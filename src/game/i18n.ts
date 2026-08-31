@@ -101,12 +101,12 @@ const ZH: GameCopy = {
     failed: '复制失败，请手动复制链接',
   },
   exitConfirm: {
-    ariaLabel: '退出走路模拟器确认',
+    ariaLabel: '退出当前关卡确认',
     kicker: 'ESC / EXIT',
-    title: '退出走路模拟器？',
-    body: '当前行走进度会被清除，并回到最开始。',
+    title: '退出当前关卡？',
+    body: '本轮进度会被清除，已获得的强化会保留。',
     cancel: '继续行走',
-    confirm: '退出模拟',
+    confirm: '返回选关',
   },
   walking: {
     tasks: '任务',
@@ -195,12 +195,12 @@ const EN: GameCopy = {
     failed: 'Could not copy. Please copy the link manually.',
   },
   exitConfirm: {
-    ariaLabel: 'Confirm exit from the walking simulator',
+    ariaLabel: 'Confirm exit from the current level',
     kicker: 'ESC / EXIT',
-    title: 'Exit the walking simulator?',
-    body: 'Your current walking progress will be cleared, and you will return to the beginning.',
+    title: 'Exit this level?',
+    body: 'This run will be cleared. Permanent upgrades will be kept.',
     cancel: 'KEEP WALKING',
-    confirm: 'EXIT SIMULATION',
+    confirm: 'LEVEL SELECT',
   },
   walking: {
     tasks: 'TASKS',

@@ -69,7 +69,7 @@ export class CrowdPhysics {
 
   update(dt: number): void {
     const state = this.simulation.state;
-    if (state.mode !== 'walking' || state.speech || state.pendingEvaluation) return;
+    if ((state.mode !== 'walking' && state.mode !== 'challenge') || (state.mode === 'walking' && (state.speech || state.pendingEvaluation))) return;
 
     this.playerContacts.forEach((id) => {
       const age = (this.contactAges.get(id) ?? 0) + dt;
@@ -78,7 +78,7 @@ export class CrowdPhysics {
     });
 
     this.rearSpawnCooldown = Math.max(0, this.rearSpawnCooldown - dt);
-    if (state.speedLevel === 0) {
+    if (state.mode === 'walking' && state.speedLevel === 0) {
       const nearbyBehind = state.npcs.filter((npc) => npc.z > state.player.z + 3 && npc.z < state.player.z + 30).length;
       if (this.lastSpeedLevel !== 0 || (nearbyBehind === 0 && this.rearSpawnCooldown === 0)) {
         this.seedRearTraffic(state);
@@ -109,7 +109,7 @@ export class CrowdPhysics {
       this.contactAges.set(otherId, 0);
       const other = state.npcs.find((npc) => npc.id === otherId);
       if (!other) return;
-      const relativeSpeed = Math.abs(SPEEDS[state.speedLevel].value - other.speed);
+      const relativeSpeed = Math.abs(state.player.speed - other.speed);
       this.simulation.registerCollision(relativeSpeed, otherId, this.getCollisionSide(otherId));
       this.pushNpcAside(otherId, relativeSpeed);
       if (relativeSpeed >= STRONG_COLLISION_SPEED_GAP) this.strongContacts.add(otherId);
@@ -121,7 +121,7 @@ export class CrowdPhysics {
       if (this.strongContacts.has(otherId)) return;
       const other = state.npcs.find((npc) => npc.id === otherId);
       if (!other) return;
-      const relativeSpeed = Math.abs(SPEEDS[state.speedLevel].value - other.speed);
+      const relativeSpeed = Math.abs(state.player.speed - other.speed);
       if (relativeSpeed < STRONG_COLLISION_SPEED_GAP) return;
       this.simulation.registerCollision(relativeSpeed, otherId, this.getCollisionSide(otherId));
       this.pushNpcAside(otherId, relativeSpeed);
@@ -136,7 +136,7 @@ export class CrowdPhysics {
       walker.z = position.z;
     });
 
-    this.recenterPlayer(state, dt);
+    if (state.mode === 'walking') this.recenterPlayer(state, dt);
 
     this.recycleCrowd(state);
   }
@@ -164,13 +164,19 @@ export class CrowdPhysics {
     const position = body.translation();
     const velocity = body.linvel();
     const isPlayer = walker.id === 'player';
-    const targetSpeed = isPlayer ? SPEEDS[state.speedLevel].value : walker.speed;
+    const challengePlayer = isPlayer && state.mode === 'challenge';
+    const targetSpeed = isPlayer ? state.player.speed : walker.speed;
     const isAvoiding = !isPlayer && walker.avoidanceTime > 0;
-    const response = isPlayer ? 12 : isAvoiding ? 8.2 : 2.35;
+    const response = isPlayer ? (challengePlayer ? 28 : 12) : isAvoiding ? 8.2 : 2.35;
     const amount = Math.min(1, dt * response);
     const lateralLimit = isPlayer ? 12 : isAvoiding ? 6.2 : 1.15;
     const lateralPull = (walker.targetX - position.x) * (isPlayer ? 14 : isAvoiding ? 4.8 : 1.65);
-    const targetXVelocity = Math.max(-lateralLimit, Math.min(lateralLimit, lateralPull));
+    let targetXVelocity = challengePlayer
+      ? state.challenge.lateralInput * state.challenge.lateralSpeed
+      : Math.max(-lateralLimit, Math.min(lateralLimit, lateralPull));
+    if (challengePlayer && ((position.x <= -4.05 && targetXVelocity < 0) || (position.x >= 4.05 && targetXVelocity > 0))) {
+      targetXVelocity = 0;
+    }
     const nextX = velocity.x + (targetXVelocity - velocity.x) * amount;
     const nextZ = velocity.z + (-targetSpeed - velocity.z) * amount;
 
@@ -182,8 +188,8 @@ export class CrowdPhysics {
 
   private getCollisionSide(otherId: string): CollisionSide {
     const state = this.simulation.state;
-    const otherSpeed = state.npcs.find((npc) => npc.id === otherId)?.speed ?? SPEEDS[state.speedLevel].value;
-    return SPEEDS[state.speedLevel].value >= otherSpeed ? 'ahead' : 'behind';
+    const otherSpeed = state.npcs.find((npc) => npc.id === otherId)?.speed ?? state.player.speed;
+    return state.player.speed >= otherSpeed ? 'ahead' : 'behind';
   }
 
   private pushNpcAside(otherId: string, relativeSpeed: number): void {
@@ -210,15 +216,19 @@ export class CrowdPhysics {
   private recycleCrowd(state: GameState): void {
     state.npcs.forEach((npc, index) => {
       let nextZ: number | null = null;
-      if (npc.z > state.player.z + 34) {
-        nextZ = state.player.z - 72 - index * 5.4;
-      } else if (npc.z < state.player.z - (state.speedLevel <= 1 ? 65 : 185)) {
+      if (state.mode === 'challenge' && state.challenge.level === 3) {
+        if (npc.z < state.player.z - 44) nextZ = state.player.z + 26 + (index % 14) * 3.1;
+      } else if (npc.z > state.player.z + 34) {
+        nextZ = state.player.z - 65 - (index % 28) * (state.mode === 'challenge' ? 3.2 : 3.5);
+      } else if (npc.z < state.player.z - (state.mode === 'walking' && state.speedLevel <= 1 ? 65 : 185)) {
         nextZ = state.player.z + 22 + (index % 4) * 5;
       }
       if (nextZ === null) return;
 
       npc.recycles += 1;
-      npc.targetX = randomStreetX(index * 7.93 + npc.recycles * 19.17);
+      npc.targetX = state.mode === 'challenge'
+        ? Math.max(-3.6, Math.min(3.6, randomStreetX(index * 7.93 + npc.recycles * 19.17)))
+        : randomStreetX(index * 7.93 + npc.recycles * 19.17);
       npc.x = npc.targetX;
       npc.z = nextZ + ((index * 31 + npc.recycles * 17) % 11) - 5;
       npc.avoidanceTime = 0;

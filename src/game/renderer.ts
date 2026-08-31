@@ -26,6 +26,12 @@ interface Burst {
   particles: BurstParticle[];
 }
 
+interface SpeedFeedback {
+  age: number;
+  direction: -1 | 1;
+  particles: BurstParticle[];
+}
+
 const SEGMENT_LENGTH = 30;
 const BUILDING_COLORS = [0xe79073, 0xe7bf66, 0x69a99f, 0x7889ad, 0xc98ca0, 0xaab17b];
 
@@ -206,12 +212,16 @@ export class GameRenderer {
   private readonly projected = new THREE.Vector3();
   private readonly clockDirection = new THREE.Vector3();
   private readonly bursts: Burst[] = [];
+  private readonly speedFeedbacks: SpeedFeedback[] = [];
+  private readonly finishGate: THREE.Group;
   private readonly liHead: THREE.Group;
   private readonly liFaceMaterial: THREE.MeshStandardMaterial;
   private lastImpactTime = 0;
   private lastInteractionCount = 0;
   private currentSegmentCenter = Number.NaN;
   private elapsed = 0;
+  private speedFeedbackCooldown = 0;
+  private lastSpeedFeedbackDirection: -1 | 0 | 1 = 0;
 
   constructor(container: HTMLElement, state: GameState) {
     this.canvas = document.createElement('canvas');
@@ -232,6 +242,8 @@ export class GameRenderer {
     this.scene.add(this.worldGroup, this.portraitGroup);
     this.setupLights();
     this.createStreet();
+    this.finishGate = this.createFinishGate();
+    this.worldGroup.add(this.finishGate);
     this.createCrowd(state);
     const bust = createLiBust();
     this.liHead = bust.head;
@@ -265,6 +277,67 @@ export class GameRenderer {
       this.worldGroup.add(group);
       this.streetSegments.push({ group, logicalIndex: 0 });
     }
+  }
+
+  private createFinishGate(): THREE.Group {
+    const group = new THREE.Group();
+    group.position.z = -360;
+    const yellow = standardMaterial(0xf5c84f, 0.62);
+    const ink = standardMaterial(0x17313a, 0.7);
+
+    [-4.45, 4.45].forEach((x) => {
+      const post = shadowed(new THREE.Mesh(new THREE.BoxGeometry(0.38, 5.6, 0.42), yellow));
+      post.position.set(x, 2.75, 0);
+      group.add(post);
+      for (let index = 0; index < 5; index += 1) {
+        const band = shadowed(new THREE.Mesh(new THREE.BoxGeometry(0.43, 0.28, 0.46), ink));
+        band.position.set(x, 0.8 + index * 1.05, 0);
+        group.add(band);
+      }
+    });
+
+    const crossbar = shadowed(new THREE.Mesh(new THREE.BoxGeometry(9.3, 0.5, 0.48), yellow));
+    crossbar.position.y = 5.35;
+    group.add(crossbar);
+    for (let index = 0; index < 12; index += 1) {
+      const tile = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.18, 0.52), index % 2 === 0 ? ink : yellow);
+      tile.position.set(-4.29 + index * 0.78, 5.36, 0);
+      group.add(tile);
+    }
+
+    const labelCanvas = document.createElement('canvas');
+    labelCanvas.width = 512;
+    labelCanvas.height = 128;
+    const context = labelCanvas.getContext('2d');
+    if (context) {
+      context.fillStyle = '#17313a';
+      context.fillRect(0, 0, labelCanvas.width, labelCanvas.height);
+      context.fillStyle = '#fff3d7';
+      context.font = '900 66px Arial, sans-serif';
+      context.textAlign = 'center';
+      context.textBaseline = 'middle';
+      context.fillText('FINISH', 256, 68);
+    }
+    const labelTexture = new THREE.CanvasTexture(labelCanvas);
+    labelTexture.colorSpace = THREE.SRGBColorSpace;
+    const label = new THREE.Mesh(
+      new THREE.PlaneGeometry(4.7, 1.18),
+      new THREE.MeshBasicMaterial({ map: labelTexture, side: THREE.DoubleSide }),
+    );
+    label.position.set(0, 4.55, 0.27);
+    group.add(label);
+
+    for (let index = 0; index < 12; index += 1) {
+      const lineTile = new THREE.Mesh(
+        new THREE.BoxGeometry(0.76, 0.035, 1.15),
+        index % 2 === 0 ? ink : yellow,
+      );
+      lineTile.position.set(-4.18 + index * 0.76, 0.025, 0);
+      lineTile.receiveShadow = true;
+      group.add(lineTile);
+    }
+    group.visible = false;
+    return group;
   }
 
   private buildStreetSegment(seed: number): THREE.Group {
@@ -375,17 +448,20 @@ export class GameRenderer {
   }
 
   update(state: GameState, dt: number): void {
-    const sceneDt = state.mode === 'walking' && (state.speech || state.pendingEvaluation) ? 0 : dt;
+    const worldMode = ['level-briefing', 'challenge', 'upgrade', 'victory', 'walking'].includes(state.mode);
+    const worldRunning = state.mode === 'challenge' || (state.mode === 'walking' && !state.speech && !state.pendingEvaluation);
+    const sceneDt = worldRunning ? dt : 0;
     this.elapsed += sceneDt;
-    const walking = state.mode === 'walking';
-    this.worldGroup.visible = walking;
-    this.portraitGroup.visible = !walking;
+    this.worldGroup.visible = worldMode;
+    this.portraitGroup.visible = !worldMode;
+    this.finishGate.visible = worldMode && state.selectedLevel === 2;
 
-    if (walking) {
+    if (worldMode) {
       this.updateStreet(state.player.z);
       this.updateCharacters(state, sceneDt);
       this.updateFollowCamera(state, sceneDt);
       this.updateBursts(state, sceneDt);
+      this.updateSpeedFeedback(state, sceneDt);
     } else {
       this.updatePortrait(state, dt);
     }
@@ -526,6 +602,103 @@ export class GameRenderer {
         this.bursts.splice(burstIndex, 1);
       }
     }
+  }
+
+  private updateSpeedFeedback(state: GameState, dt: number): void {
+    if (state.mode !== 'challenge') {
+      this.clearSpeedFeedback();
+      return;
+    }
+
+    this.speedFeedbackCooldown = Math.max(0, this.speedFeedbackCooldown - dt);
+    const direction = state.challenge.speedInput;
+    if (direction !== 0 && dt > 0 && this.speedFeedbackCooldown === 0) {
+      this.speedFeedbackCooldown = 0.16;
+      this.lastSpeedFeedbackDirection = direction;
+      const particles: BurstParticle[] = [];
+      for (let index = 0; index < 14; index += 1) {
+        const angle = (index / 14) * Math.PI * 2;
+        const primary = direction > 0 ? 0xf5c84f : 0xed715b;
+        const secondary = direction > 0 ? 0x6dc7bd : 0x9d78df;
+        const material = new THREE.MeshBasicMaterial({
+          color: index % 2 === 0 ? primary : secondary,
+          transparent: true,
+          opacity: 0.92,
+          depthWrite: false,
+        });
+        const mesh = new THREE.Mesh(new THREE.TetrahedronGeometry(0.11 + (index % 3) * 0.025), material);
+        mesh.position.set(
+          state.player.x + Math.cos(angle) * 0.72,
+          0.45 + (index % 4) * 0.34,
+          state.player.z + Math.sin(angle) * 0.5,
+        );
+        this.worldGroup.add(mesh);
+        const longitudinal = direction > 0 ? 2.4 : -1.7;
+        particles.push({
+          mesh,
+          velocity: new THREE.Vector3(Math.cos(angle) * 0.85, 0.35 + (index % 3) * 0.22, longitudinal + Math.sin(angle) * 0.45),
+        });
+      }
+      const ringMaterial = new THREE.MeshBasicMaterial({
+        color: direction > 0 ? 0x6dc7bd : 0xed715b,
+        transparent: true,
+        opacity: 0.8,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      });
+      const ring = new THREE.Mesh(new THREE.RingGeometry(0.62, 0.75, 32), ringMaterial);
+      ring.position.set(state.player.x, 0.12, state.player.z);
+      ring.rotation.x = -Math.PI / 2;
+      this.worldGroup.add(ring);
+      particles.push({ mesh: ring, velocity: new THREE.Vector3(0, 0.18, direction > 0 ? 1.25 : -0.8) });
+      this.speedFeedbacks.push({ age: 0, direction, particles });
+    }
+
+    for (let burstIndex = this.speedFeedbacks.length - 1; burstIndex >= 0; burstIndex -= 1) {
+      const feedback = this.speedFeedbacks[burstIndex];
+      feedback.age += dt;
+      const life = Math.max(0, 1 - feedback.age / 0.9);
+      feedback.particles.forEach((particle) => {
+        particle.mesh.position.addScaledVector(particle.velocity, dt);
+        particle.mesh.rotation.x += dt * 12;
+        particle.mesh.rotation.y += dt * 9;
+        particle.mesh.scale.setScalar(0.72 + (1 - life) * 1.15);
+        (particle.mesh.material as THREE.MeshBasicMaterial).opacity = life * 0.92;
+      });
+      if (feedback.age >= 0.9) {
+        this.disposeParticles(feedback.particles);
+        this.speedFeedbacks.splice(burstIndex, 1);
+      }
+    }
+  }
+
+  private clearSpeedFeedback(): void {
+    this.speedFeedbacks.forEach((feedback) => this.disposeParticles(feedback.particles));
+    this.speedFeedbacks.length = 0;
+    this.speedFeedbackCooldown = 0;
+    this.lastSpeedFeedbackDirection = 0;
+  }
+
+  private disposeParticles(particles: BurstParticle[]): void {
+    particles.forEach((particle) => {
+      this.worldGroup.remove(particle.mesh);
+      particle.mesh.geometry.dispose();
+      (particle.mesh.material as THREE.Material).dispose();
+    });
+  }
+
+  getChallengeVisualDebugState(state: GameState): {
+    finishGateVisible: boolean;
+    finishGateDistanceAhead: number | null;
+    speedFeedbackBursts: number;
+    speedFeedbackDirection: -1 | 0 | 1;
+  } {
+    return {
+      finishGateVisible: this.finishGate.visible,
+      finishGateDistanceAhead: this.finishGate.visible ? Number((state.player.z - this.finishGate.position.z).toFixed(2)) : null,
+      speedFeedbackBursts: this.speedFeedbacks.length,
+      speedFeedbackDirection: this.lastSpeedFeedbackDirection,
+    };
   }
 
   getPlayerScreenPosition(state: GameState): { x: number; y: number; visible: boolean } {

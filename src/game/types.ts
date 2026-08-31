@@ -1,8 +1,21 @@
 import { COPY } from './i18n';
 
-export type GameMode = 'intro' | 'walking' | 'return' | 'interaction' | 'departed';
+export type GameMode =
+  | 'intro'
+  | 'level-select'
+  | 'level-briefing'
+  | 'challenge'
+  | 'upgrade'
+  | 'victory'
+  | 'walking'
+  | 'return'
+  | 'interaction'
+  | 'departed';
 export type InteractionKind = 'punch' | 'pet' | null;
 export type CollisionSide = 'ahead' | 'behind';
+export type ChallengeLevelId = 1 | 2 | 3;
+export type LevelId = ChallengeLevelId | 4;
+export type ChallengeUpgradeKey = 'response' | 'lateral' | 'maxSpeed' | 'power' | 'mood' | 'guard';
 
 export interface SpeedDefinition {
   id: 'stopped' | 'slow' | 'normal' | 'brisk' | 'run';
@@ -35,8 +48,44 @@ export interface SpeechState {
   elapsed: number;
 }
 
+export interface MetaProgress {
+  completed: Record<ChallengeLevelId, boolean>;
+  attempts: Record<ChallengeLevelId, number>;
+  upgrades: {
+    1: { response: number; lateral: number };
+    2: { maxSpeed: number; power: number };
+    3: { mood: number; guard: number };
+  };
+}
+
+export interface ChallengeState {
+  level: ChallengeLevelId | null;
+  time: number;
+  timeLimit: number;
+  distance: number;
+  finishDistance: number;
+  targetSpeed: number;
+  currentSpeed: number;
+  minSpeed: number;
+  maxSpeed: number;
+  speedResponse: number;
+  lateralSpeed: number;
+  speedInput: -1 | 0 | 1;
+  lateralInput: -1 | 0 | 1;
+  mood: number;
+  maxMood: number;
+  hitDamage: number;
+  hitCount: number;
+  invulnerableTime: number;
+  resultReason: string;
+  lastUpgrade: ChallengeUpgradeKey | null;
+}
+
 export interface GameState {
   mode: GameMode;
+  selectedLevel: LevelId | null;
+  meta: MetaProgress;
+  challenge: ChallengeState;
   speedLevel: number;
   player: WalkerState;
   npcs: WalkerState[];
