@@ -1,4 +1,5 @@
 import { LANGUAGE } from './i18n';
+import { getLevelBalance } from './balance';
 import type { ChallengeLevelId, ChallengeUpgradeKey, LevelId, MetaProgress } from './types';
 
 type Localized = { zh: string; en: string };
@@ -63,7 +64,7 @@ const UPGRADE_COPY: Record<ChallengeUpgradeKey, { name: Localized; effect: Local
   },
   maxSpeed: {
     name: { zh: '提高最高速度', en: 'Raise top speed' },
-    effect: { zh: '最高速度 +0.75 m/s', en: 'Top speed +0.75 m/s' },
+    effect: { zh: '最高速度 +1.6 m/s', en: 'Top speed +1.6 m/s' },
   },
   power: {
     name: { zh: '提高攻击力', en: 'Raise power' },
@@ -80,12 +81,13 @@ const UPGRADE_COPY: Record<ChallengeUpgradeKey, { name: Localized; effect: Local
 };
 
 export const CHALLENGE_UI = LANGUAGE === 'zh-CN' ? {
-  selectKicker: 'SELECT YOUR PROBLEM', selectTitle: '今天，你想怎么死？', selectBody: '失败不是清零。每次失败都能留下一个永久强化。',
+  selectKicker: 'SELECT YOUR PROBLEM', selectTitle: '今天，你想怎么死？', selectBody: '失败后可强化本关能力；退出关卡后等级重置。',
   locked: '尚未解锁', unlocked: '可以挑战', cleared: '已通关', attempt: '尝试', times: '次', clearCount: '前三关进度',
-  briefingKicker: 'BEFORE YOU WALK', start: '开始这一轮', back: '返回选关', controls: 'W/S 调节目标速度 · A/D 左右移动',
+  briefingKicker: 'BEFORE YOU WALK', start: '开始这一轮', back: '返回选关', controls: 'W/S 切换持续加速或减速 · A/D 左右移动',
   run: '本轮', target: '目标', currentSpeed: '当前速度', targetSpeed: '目标速度', response: '变速响应', lateral: '横移速度',
+  speedLatch: '按一下切换持续加速 / 减速',
   distance: '路程', mood: '心情', hits: '碰撞', seconds: '秒', meters: '米',
-  failKicker: 'RUN OVER', failTitle: '这次没走成。', chooseUpgrade: '选一项永久强化，再试一次。',
+  failKicker: 'RUN OVER', failTitle: '这次没走成。', chooseUpgrade: '选一项本关强化，再试一次。',
   victoryKicker: 'LEVEL CLEAR', victoryTitle: '这一次，你走过去了。', victoryBack: '回到关卡选择',
   allUnlocked: '第四关已解锁', left: '左移', right: '右移', faster: '快一点', slower: '慢一点',
   rearWarning: '后方有人接近',
@@ -93,12 +95,13 @@ export const CHALLENGE_UI = LANGUAGE === 'zh-CN' ? {
     touched: '你碰到了别人。这里，一碰就死。', timeout: '夜已经过去，你还没到。', arrivedEarly: '你太快走完了这段路。', cried: '心情见底，你忍不住大哭起来。',
   },
 } : {
-  selectKicker: 'SELECT YOUR PROBLEM', selectTitle: 'How would you like to die today?', selectBody: 'Failure is not a reset. Every loss leaves one permanent upgrade.',
+  selectKicker: 'SELECT YOUR PROBLEM', selectTitle: 'How would you like to die today?', selectBody: 'Failures strengthen this level. Leaving it resets those upgrades.',
   locked: 'LOCKED', unlocked: 'READY', cleared: 'CLEARED', attempt: 'ATTEMPT', times: '', clearCount: 'FIRST THREE',
-  briefingKicker: 'BEFORE YOU WALK', start: 'START THIS RUN', back: 'BACK TO LEVELS', controls: 'W/S changes target pace · A/D sidesteps',
+  briefingKicker: 'BEFORE YOU WALK', start: 'START THIS RUN', back: 'BACK TO LEVELS', controls: 'W/S latches acceleration or braking · A/D sidesteps',
   run: 'RUN', target: 'GOAL', currentSpeed: 'CURRENT', targetSpeed: 'TARGET', response: 'PACE RESPONSE', lateral: 'SIDESTEP',
+  speedLatch: 'Press once to latch acceleration / braking',
   distance: 'DISTANCE', mood: 'MOOD', hits: 'HITS', seconds: 'SEC', meters: 'M',
-  failKicker: 'RUN OVER', failTitle: 'That walk did not work.', chooseUpgrade: 'Choose one permanent upgrade, then try again.',
+  failKicker: 'RUN OVER', failTitle: 'That walk did not work.', chooseUpgrade: 'Choose one upgrade for this level, then try again.',
   victoryKicker: 'LEVEL CLEAR', victoryTitle: 'This time, you made it through.', victoryBack: 'BACK TO LEVEL SELECT',
   allUnlocked: 'LEVEL 04 UNLOCKED', left: 'LEFT', right: 'RIGHT', faster: 'FASTER', slower: 'SLOWER',
   rearWarning: 'FAST WALKER BEHIND',
@@ -117,7 +120,17 @@ export function getLevel(id: LevelId): LevelDefinition {
 
 export function getUpgradeCopy(key: ChallengeUpgradeKey): { name: string; effect: string } {
   const value = UPGRADE_COPY[key];
-  return { name: localized(value.name), effect: localized(value.effect) };
+  const level = key === 'response' || key === 'lateral' ? 1 : key === 'maxSpeed' || key === 'power' ? 2 : 3;
+  const balance = getLevelBalance(level);
+  const amount = key === 'response' ? balance.responseUpgrade
+    : key === 'lateral' ? balance.lateralUpgrade
+      : key === 'maxSpeed' ? balance.maxSpeedUpgrade
+        : key === 'power' ? balance.powerReduction
+          : key === 'mood' ? balance.moodUpgrade
+            : balance.guardReduction;
+  const unit = key === 'mood' || key === 'guard' ? '' : key === 'response' ? ' m/s²' : ' m/s';
+  const prefix = key === 'power' || key === 'guard' ? '−' : '+';
+  return { name: localized(value.name), effect: `${prefix}${amount}${unit}` };
 }
 
 export function getUpgradeLevel(meta: MetaProgress, level: ChallengeLevelId, key: ChallengeUpgradeKey): number {
@@ -126,11 +139,12 @@ export function getUpgradeLevel(meta: MetaProgress, level: ChallengeLevelId, key
 }
 
 export function getChallengeStats(meta: MetaProgress, level: ChallengeLevelId) {
+  const balance = getLevelBalance(level);
   if (level === 1) {
-    return { maxSpeed: 16, minSpeed: 0, response: 2.2 + meta.upgrades[1].response * 0.9, lateral: 0.8 + meta.upgrades[1].lateral * 0.45, maxMood: 0, hitDamage: 0, finishDistance: 0 };
+    return { ...balance, minSpeed: 0, response: balance.response + meta.upgrades[1].response * balance.responseUpgrade, lateral: balance.lateral + meta.upgrades[1].lateral * balance.lateralUpgrade };
   }
   if (level === 2) {
-    return { maxSpeed: 18.5 + meta.upgrades[2].maxSpeed * 0.75, minSpeed: 0, response: 16, lateral: 2.7, maxMood: 0, hitDamage: Math.max(1.6, 7.2 - meta.upgrades[2].power * 1.4), finishDistance: 360 };
+    return { ...balance, minSpeed: 0, maxSpeed: balance.maxSpeed + meta.upgrades[2].maxSpeed * balance.maxSpeedUpgrade, hitDamage: Math.max(0, balance.hitDamage - meta.upgrades[2].power * balance.powerReduction) };
   }
-  return { maxSpeed: 16, minSpeed: 0, response: 6.5, lateral: 2.8, maxMood: 45 + meta.upgrades[3].mood * 14, hitDamage: Math.max(3, 18 - meta.upgrades[3].guard * 4), finishDistance: 140 };
+  return { ...balance, minSpeed: 0, maxMood: balance.maxMood + meta.upgrades[3].mood * balance.moodUpgrade, hitDamage: Math.max(0, balance.hitDamage - meta.upgrades[3].guard * balance.guardReduction) };
 }

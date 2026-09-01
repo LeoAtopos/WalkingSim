@@ -284,6 +284,10 @@ export class GameRenderer {
     group.position.z = -360;
     const yellow = standardMaterial(0xf5c84f, 0.62);
     const ink = standardMaterial(0x17313a, 0.7);
+    // The third level starts far from the exit. Keep the gate readable through
+    // the atmospheric fog so it can act as a fixed visual goal from frame one.
+    yellow.fog = false;
+    ink.fog = false;
 
     [-4.45, 4.45].forEach((x) => {
       const post = shadowed(new THREE.Mesh(new THREE.BoxGeometry(0.38, 5.6, 0.42), yellow));
@@ -322,7 +326,7 @@ export class GameRenderer {
     labelTexture.colorSpace = THREE.SRGBColorSpace;
     const label = new THREE.Mesh(
       new THREE.PlaneGeometry(4.7, 1.18),
-      new THREE.MeshBasicMaterial({ map: labelTexture, side: THREE.DoubleSide }),
+      new THREE.MeshBasicMaterial({ map: labelTexture, side: THREE.DoubleSide, fog: false }),
     );
     label.position.set(0, 4.55, 0.27);
     group.add(label);
@@ -448,13 +452,15 @@ export class GameRenderer {
   }
 
   update(state: GameState, dt: number): void {
-    const worldMode = ['level-briefing', 'challenge', 'upgrade', 'victory', 'walking'].includes(state.mode);
-    const worldRunning = state.mode === 'challenge' || (state.mode === 'walking' && !state.speech && !state.pendingEvaluation);
+    const worldMode = ['level-briefing', 'challenge', 'challenge-failure', 'upgrade', 'victory', 'walking'].includes(state.mode);
+    const worldRunning = state.mode === 'challenge' || state.mode === 'challenge-failure' || (state.mode === 'walking' && !state.speech && !state.pendingEvaluation);
     const sceneDt = worldRunning ? dt : 0;
     this.elapsed += sceneDt;
     this.worldGroup.visible = worldMode;
     this.portraitGroup.visible = !worldMode;
-    this.finishGate.visible = worldMode && state.selectedLevel === 2;
+    const hasFinishGate = state.challenge.level === 2 || state.challenge.level === 3;
+    this.finishGate.visible = worldMode && hasFinishGate;
+    if (hasFinishGate) this.finishGate.position.z = -state.challenge.finishDistance;
 
     if (worldMode) {
       this.updateStreet(state.player.z);
@@ -503,6 +509,8 @@ export class GameRenderer {
       rig.rightLeg.rotation.x = -swing;
       rig.leftArm.rotation.x = -swing * 0.72;
       rig.rightArm.rotation.x = swing * 0.72;
+      rig.leftArm.rotation.z *= Math.pow(0.01, dt);
+      rig.rightArm.rotation.z *= Math.pow(0.01, dt);
       rig.root.position.y = strideSpeed > 0 ? Math.abs(Math.sin(walker.phase * 2)) * 0.035 * intensity : 0;
       if (walker.id === 'player') {
         rig.root.rotation.z *= Math.pow(0.01, dt);
@@ -513,9 +521,23 @@ export class GameRenderer {
     });
 
     const playerRig = this.characterRigs.get('player');
-    if (playerRig && state.impactTime > 0) {
-      playerRig.root.rotation.z = Math.sin(state.impactTime * 25) * 0.18 * state.impactStrength;
-      playerRig.root.rotation.x = -0.18 * state.impactStrength;
+    if (playerRig) {
+      playerRig.root.rotation.x *= Math.pow(0.02, dt);
+      if (state.impactTime > 0) {
+        playerRig.root.rotation.z = Math.sin(state.impactTime * 25) * 0.18 * state.impactStrength;
+        playerRig.root.rotation.x = -0.18 * state.impactStrength;
+      } else if (state.mode === 'challenge-failure' && state.challenge.failureKind === 'cried') {
+        const sob = Math.sin(state.challenge.failureElapsed * 10);
+        playerRig.root.rotation.x = 0.22 + sob * 0.035;
+        playerRig.root.rotation.z = sob * 0.045;
+        playerRig.head.rotation.x = -0.38 + sob * 0.06;
+        playerRig.leftArm.rotation.x = -0.35 + sob * 0.08;
+        playerRig.rightArm.rotation.x = -0.35 - sob * 0.08;
+        playerRig.leftArm.rotation.z = 2.28 + sob * 0.08;
+        playerRig.rightArm.rotation.z = -2.28 - sob * 0.08;
+      } else {
+        playerRig.head.rotation.x *= Math.pow(0.02, dt);
+      }
     }
   }
 

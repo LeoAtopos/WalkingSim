@@ -1,12 +1,14 @@
 import { INTERACTION_TARGET, SPEEDS, SPEECH_CONTINUE_DELAY, TASK_DURATION, type ChallengeUpgradeKey, type GameState, type InteractionKind, type LevelId } from './types';
 import { COPY, LANGUAGE, setLanguagePreference } from './i18n';
 import { CHALLENGE_UI, LEVELS, getChallengeStats, getLevel, getUpgradeCopy, getUpgradeLevel, localized } from './challenges';
+import { DEFAULT_BALANCE, getBalanceConfig, getExperienceRequirement, saveBalanceConfig, type BalanceConfig, type LevelBalance } from './balance';
 
 interface UIActions {
   onStart: () => void;
   onSelectLevel: (level: LevelId) => void;
   onBeginChallenge: () => void;
   onChooseUpgrade: (key: ChallengeUpgradeKey) => void;
+  onRetryChallenge: () => void;
   onReturnToLevels: () => void;
   onFinishVictory: () => void;
   onChallengeInput: (axis: 'speed' | 'lateral', value: -1 | 0 | 1) => void;
@@ -25,6 +27,46 @@ interface UIActions {
 
 const CHECKLIST_SPEEDS = [...SPEEDS].reverse();
 const SHARE_URL = 'https://leoatopos.github.io/WalkingSim/';
+const BALANCE_FIELDS: Record<1 | 2 | 3, readonly { key: keyof LevelBalance; label: string; unit: string; step: number }[]> = {
+  1: [
+    { key: 'timeLimit', label: '挑战时间', unit: '秒', step: 1 }, { key: 'failureDuration', label: '失败演出时长', unit: '秒', step: 0.1 },
+    { key: 'xpRewardMax', label: '满进度经验奖励', unit: 'XP', step: 1 }, { key: 'xpBaseRequirement', label: '首次升级需求', unit: 'XP', step: 1 },
+    { key: 'xpLinearGrowth', label: '每级需求增长', unit: 'XP', step: 1 }, { key: 'xpQuadraticGrowth', label: '高等级额外增长', unit: 'XP', step: 1 },
+    { key: 'maxSpeed', label: '最高速度', unit: 'm/s', step: 0.1 },
+    { key: 'response', label: '初始加速度', unit: 'm/s²', step: 0.1 }, { key: 'targetAdjustRate', label: '目标速度调节率', unit: 'm/s²', step: 0.1 },
+    { key: 'lateral', label: '初始横移速度', unit: 'm/s', step: 0.01 }, { key: 'responseUpgrade', label: '加速度每级提升', unit: 'm/s²', step: 0.1 },
+    { key: 'lateralUpgrade', label: '横移每级提升', unit: 'm/s', step: 0.05 },
+    { key: 'crowdAheadCount', label: '前方 NPC 数量', unit: '人', step: 1 }, { key: 'crowdAheadStart', label: '前方最近距离', unit: '米', step: 0.1 },
+    { key: 'crowdAheadSpacing', label: '前方纵向间距', unit: '米', step: 0.1 }, { key: 'crowdBehindStart', label: '后方最近距离', unit: '米', step: 0.1 },
+    { key: 'crowdBehindSpacing', label: '后方纵向间距', unit: '米', step: 0.1 },
+  ],
+  2: [
+    { key: 'timeLimit', label: '限时', unit: '秒', step: 1 }, { key: 'failureDuration', label: '失败演出时长', unit: '秒', step: 0.1 },
+    { key: 'xpRewardMax', label: '满进度经验奖励', unit: 'XP', step: 1 }, { key: 'xpBaseRequirement', label: '首次升级需求', unit: 'XP', step: 1 },
+    { key: 'xpLinearGrowth', label: '每级需求增长', unit: 'XP', step: 1 }, { key: 'xpQuadraticGrowth', label: '高等级额外增长', unit: 'XP', step: 1 },
+    { key: 'finishDistance', label: '终点距离', unit: '米', step: 5 },
+    { key: 'maxSpeed', label: '初始最高速度', unit: 'm/s', step: 0.1 }, { key: 'response', label: '初始加速度', unit: 'm/s²', step: 0.1 },
+    { key: 'targetAdjustRate', label: '目标速度调节率', unit: 'm/s²', step: 0.1 }, { key: 'lateral', label: '横移速度', unit: 'm/s', step: 0.01 },
+    { key: 'hitDamage', label: '碰撞掉速', unit: 'm/s', step: 0.1 }, { key: 'maxSpeedUpgrade', label: '最高速度每级提升', unit: 'm/s', step: 0.1 },
+    { key: 'powerReduction', label: '攻击力每级减免', unit: 'm/s', step: 0.1 },
+    { key: 'crowdAheadCount', label: '前方 NPC 数量', unit: '人', step: 1 }, { key: 'crowdAheadStart', label: '前方最近距离', unit: '米', step: 0.1 },
+    { key: 'crowdAheadSpacing', label: '前方纵向间距', unit: '米', step: 0.1 }, { key: 'crowdBehindStart', label: '后方最近距离', unit: '米', step: 0.1 },
+    { key: 'crowdBehindSpacing', label: '后方纵向间距', unit: '米', step: 0.1 },
+  ],
+  3: [
+    { key: 'timeLimit', label: '坚持时间', unit: '秒', step: 1 }, { key: 'failureDuration', label: '失败演出时长', unit: '秒', step: 0.1 },
+    { key: 'xpRewardMax', label: '满进度经验奖励', unit: 'XP', step: 1 }, { key: 'xpBaseRequirement', label: '首次升级需求', unit: 'XP', step: 1 },
+    { key: 'xpLinearGrowth', label: '每级需求增长', unit: 'XP', step: 1 }, { key: 'xpQuadraticGrowth', label: '高等级额外增长', unit: 'XP', step: 1 },
+    { key: 'finishDistance', label: '终点距离', unit: '米', step: 5 },
+    { key: 'maxSpeed', label: '最高速度', unit: 'm/s', step: 0.1 }, { key: 'response', label: '初始加速度', unit: 'm/s²', step: 0.1 },
+    { key: 'targetAdjustRate', label: '目标速度调节率', unit: 'm/s²', step: 0.1 }, { key: 'lateral', label: '横移速度', unit: 'm/s', step: 0.01 },
+    { key: 'maxMood', label: '初始心情', unit: '', step: 1 }, { key: 'hitDamage', label: '每次碰撞心情伤害', unit: '', step: 1 },
+    { key: 'moodUpgrade', label: '心情每级提升', unit: '', step: 1 }, { key: 'guardReduction', label: '封闭内心每级减免', unit: '', step: 1 },
+    { key: 'crowdAheadCount', label: '前方 NPC 数量', unit: '人', step: 1 }, { key: 'crowdAheadStart', label: '前方最近距离', unit: '米', step: 0.1 },
+    { key: 'crowdAheadSpacing', label: '前方纵向间距', unit: '米', step: 0.1 }, { key: 'crowdBehindStart', label: '后方最近距离', unit: '米', step: 0.1 },
+    { key: 'crowdBehindSpacing', label: '后方纵向间距', unit: '米', step: 0.1 },
+  ],
+};
 
 export class GameUI {
   private readonly root: HTMLDivElement;
@@ -70,6 +112,11 @@ export class GameUI {
   private readonly interactionHint: HTMLElement;
   private readonly shareToast: HTMLElement;
   private readonly shareButton: HTMLButtonElement;
+  private readonly balanceEditor: HTMLElement;
+  private readonly balanceEditorFields: HTMLElement;
+  private readonly balanceEditorStatus: HTMLElement;
+  private editingBalanceLevel: 1 | 2 | 3 = 1;
+  private editingBalance: BalanceConfig = getBalanceConfig();
   private readonly taskElements = new Map<string, { row: HTMLElement; fill: HTMLElement; status: HTMLElement; time: HTMLElement }>();
   private lastInteractionCount = 0;
   private lastMode: GameState['mode'] | null = null;
@@ -79,6 +126,7 @@ export class GameUI {
   private shareToastTimeout = 0;
   private lastUpgradeRenderKey = '';
   private lastBriefingRenderKey = '';
+  private lastExperienceAnimationKey = '';
 
   constructor(container: HTMLElement, private readonly actions: UIActions) {
     this.root = document.createElement('div');
@@ -109,8 +157,25 @@ export class GameUI {
           <h1>${CHALLENGE_UI.selectTitle}</h1>
           <p>${CHALLENGE_UI.selectBody}</p>
           <div class="level-clear-count"><span>${CHALLENGE_UI.clearCount}</span><strong id="level-clear-count">0 / 3</strong></div>
+          <button id="balance-editor-open" class="balance-editor-open" type="button"><span>⚙</span> 编辑关卡数值</button>
         </div>
         <div id="level-grid" class="level-grid"></div>
+      </section>
+
+      <section id="balance-editor" class="balance-editor is-hidden" aria-label="关卡数值编辑器">
+        <div class="balance-editor-card">
+          <header><div><span class="eyebrow">BALANCE LAB</span><h2>关卡数值实验室</h2><p>保存后，下一轮挑战立即采用这些数值。</p></div><button id="balance-editor-close" class="balance-editor-close" type="button" aria-label="关闭">×</button></header>
+          <nav id="balance-editor-tabs" class="balance-editor-tabs" aria-label="选择关卡">
+            <button type="button" data-balance-level="1">01 一碰就死</button>
+            <button type="button" data-balance-level="2">02 一晚就死</button>
+            <button type="button" data-balance-level="3">03 一哭就死</button>
+          </nav>
+          <div id="balance-editor-fields" class="balance-editor-fields"></div>
+          <footer>
+            <span id="balance-editor-status" class="balance-editor-status">数值仅用于实验配置</span>
+            <div><button id="balance-editor-reset" class="text-button" type="button">恢复全部默认值</button><button id="balance-editor-save" class="game-button primary-button" type="button">保存并返回 <span>→</span></button></div>
+          </footer>
+        </div>
       </section>
 
       <section id="briefing-screen" class="scene-ui briefing-ui is-hidden" aria-label="${CHALLENGE_UI.briefingKicker}">
@@ -140,7 +205,7 @@ export class GameUI {
           <em><i id="mood-fill"></i></em>
         </div>
         <div id="rear-warning" class="rear-warning is-hidden">↓ ${CHALLENGE_UI.rearWarning}</div>
-        <div class="challenge-control-hint"><kbd>W</kbd><kbd>S</kbd> ${CHALLENGE_UI.targetSpeed} · <kbd>A</kbd><kbd>D</kbd> ${CHALLENGE_UI.lateral}</div>
+        <div class="challenge-control-hint"><kbd>W</kbd><kbd>S</kbd> ${CHALLENGE_UI.speedLatch} · <kbd>A</kbd><kbd>D</kbd> ${CHALLENGE_UI.lateral}</div>
         <div class="challenge-touch-controls">
           <button type="button" data-challenge-axis="lateral" data-challenge-value="-1">←<span>${CHALLENGE_UI.left}</span></button>
           <button type="button" data-challenge-axis="speed" data-challenge-value="-1">−<span>${CHALLENGE_UI.slower}</span></button>
@@ -148,15 +213,35 @@ export class GameUI {
           <button type="button" data-challenge-axis="lateral" data-challenge-value="1">→<span>${CHALLENGE_UI.right}</span></button>
         </div>
         <div id="challenge-impact-text" class="impact-text is-hidden" aria-live="polite"></div>
+        <div id="challenge-failure-sequence" class="challenge-failure-sequence is-hidden" aria-live="assertive">
+          <div class="failure-visual" aria-hidden="true">
+            <i class="collision-ring"></i><i class="collision-ring"></i>
+            <div class="broken-heart"><span>♥</span><span>♥</span></div>
+            <div class="cry-tears"><i></i><i></i><i></i><i></i></div>
+          </div>
+          <span id="failure-sequence-kicker"></span>
+          <strong id="failure-sequence-title"></strong>
+          <small id="failure-sequence-detail"></small>
+        </div>
       </section>
 
       <section id="upgrade-screen" class="scene-ui run-result-ui is-hidden" aria-label="${CHALLENGE_UI.failKicker}">
         <div class="run-result-card fail-card">
           <span class="eyebrow">${CHALLENGE_UI.failKicker}</span>
+          <div id="persistent-failure-feedback" class="persistent-failure-feedback">
+            <b id="persistent-failure-icon" aria-hidden="true"></b>
+            <div><span id="persistent-failure-kicker"></span><strong id="persistent-failure-title"></strong><small id="persistent-failure-detail"></small></div>
+          </div>
+          <div id="experience-settlement" class="experience-settlement">
+            <div class="experience-heading"><span id="experience-level"></span><strong id="experience-gained"></strong></div>
+            <div class="experience-track"><i id="experience-fill"></i></div>
+            <div class="experience-caption"><span id="experience-progress-copy"></span><b id="experience-next-copy"></b></div>
+          </div>
           <h2>${CHALLENGE_UI.failTitle}</h2>
           <p id="failure-reason"></p>
-          <small>${CHALLENGE_UI.chooseUpgrade}</small>
+          <small id="upgrade-instruction">${CHALLENGE_UI.chooseUpgrade}</small>
           <div id="upgrade-choices" class="upgrade-choices"></div>
+          <button id="retry-without-upgrade" class="game-button primary-button retry-without-upgrade is-hidden" type="button"></button>
           <button id="upgrade-back" class="text-button" type="button">← ${CHALLENGE_UI.back}</button>
         </div>
       </section>
@@ -316,6 +401,9 @@ export class GameUI {
     this.interactionHint = this.getElement('interaction-hint');
     this.shareToast = this.getElement('share-toast');
     this.shareButton = this.getElement('portrait-share') as HTMLButtonElement;
+    this.balanceEditor = this.getElement('balance-editor');
+    this.balanceEditorFields = this.getElement('balance-editor-fields');
+    this.balanceEditorStatus = this.getElement('balance-editor-status');
 
     this.createLevelCards();
     this.createTaskRows();
@@ -383,6 +471,21 @@ export class GameUI {
 
   private bindEvents(): void {
     this.getElement('start-btn').addEventListener('click', this.actions.onStart);
+    this.getElement('balance-editor-open').addEventListener('click', () => this.openBalanceEditor());
+    this.getElement('balance-editor-close').addEventListener('click', () => this.closeBalanceEditor());
+    this.getElement('balance-editor-save').addEventListener('click', () => this.saveBalanceEditor());
+    this.getElement('balance-editor-reset').addEventListener('click', () => {
+      this.editingBalance = structuredClone(DEFAULT_BALANCE);
+      this.renderBalanceEditor();
+      this.balanceEditorStatus.textContent = '已载入默认值，点击“保存并返回”后生效';
+    });
+    this.getElement('balance-editor-tabs').addEventListener('click', (event) => {
+      const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-balance-level]');
+      if (!button) return;
+      this.captureBalanceFields();
+      this.editingBalanceLevel = Number(button.dataset.balanceLevel) as 1 | 2 | 3;
+      this.renderBalanceEditor();
+    });
     this.levelGrid.addEventListener('click', (event) => {
       const card = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-level]');
       if (!card || card.disabled) return;
@@ -391,6 +494,7 @@ export class GameUI {
     this.getElement('begin-challenge').addEventListener('click', this.actions.onBeginChallenge);
     this.getElement('briefing-back').addEventListener('click', this.actions.onReturnToLevels);
     this.getElement('upgrade-back').addEventListener('click', this.actions.onReturnToLevels);
+    this.getElement('retry-without-upgrade').addEventListener('click', this.actions.onRetryChallenge);
     this.getElement('victory-back').addEventListener('click', this.actions.onFinishVictory);
     this.upgradeChoices.addEventListener('click', (event) => {
       const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-upgrade]');
@@ -404,7 +508,9 @@ export class GameUI {
         button.setPointerCapture?.(event.pointerId);
         this.actions.onChallengeInput(axis, value);
       };
-      const stop = () => this.actions.onChallengeInput(axis, 0);
+      const stop = () => {
+        if (axis === 'lateral') this.actions.onChallengeInput(axis, 0);
+      };
       button.addEventListener('pointerdown', start);
       button.addEventListener('pointerup', stop);
       button.addEventListener('pointercancel', stop);
@@ -452,6 +558,46 @@ export class GameUI {
       if (performance.now() < this.interactionUnlockAt) return;
       this.actions.onInteract();
     });
+  }
+
+  private openBalanceEditor(): void {
+    this.editingBalance = getBalanceConfig();
+    this.editingBalanceLevel = 1;
+    this.balanceEditorStatus.textContent = '数值仅用于实验配置';
+    this.renderBalanceEditor();
+    this.balanceEditor.classList.remove('is-hidden');
+  }
+
+  private closeBalanceEditor(): void {
+    this.balanceEditor.classList.add('is-hidden');
+  }
+
+  private captureBalanceFields(): void {
+    this.balanceEditorFields.querySelectorAll<HTMLInputElement>('input[data-balance-key]').forEach((input) => {
+      const key = input.dataset.balanceKey as keyof LevelBalance;
+      const value = Number(input.value);
+      if (Number.isFinite(value)) this.editingBalance[this.editingBalanceLevel][key] = Math.max(0, value);
+    });
+  }
+
+  private renderBalanceEditor(): void {
+    this.root.querySelectorAll<HTMLButtonElement>('[data-balance-level]').forEach((button) => {
+      button.classList.toggle('is-active', Number(button.dataset.balanceLevel) === this.editingBalanceLevel);
+    });
+    const level = this.editingBalanceLevel;
+    this.balanceEditorFields.innerHTML = BALANCE_FIELDS[level].map((field) => `
+      <label class="balance-field">
+        <span>${field.label}<small>${field.unit}</small></span>
+        <input type="number" min="0" max="9999" step="${field.step}" value="${this.editingBalance[level][field.key]}" data-balance-key="${field.key}" />
+      </label>
+    `).join('');
+  }
+
+  private saveBalanceEditor(): void {
+    this.captureBalanceFields();
+    saveBalanceConfig(this.editingBalance);
+    this.balanceEditorStatus.textContent = '已保存，下一轮挑战生效';
+    window.setTimeout(() => this.closeBalanceEditor(), 260);
   }
 
   setAudioMuted(muted: boolean): void {
@@ -530,7 +676,7 @@ export class GameUI {
     if ((state.mode === 'intro' || state.mode === 'return') && portraitScreen.visible) {
       this.positionNearCharacter(state.mode === 'intro' ? this.introDialogue : this.returnDialogue, portraitScreen, 'portrait');
     }
-    if (['level-select', 'level-briefing', 'challenge', 'upgrade', 'victory'].includes(state.mode)) {
+    if (['level-select', 'level-briefing', 'challenge', 'challenge-failure', 'upgrade', 'victory'].includes(state.mode)) {
       this.updateChallengeFlow(state);
     }
     if (state.mode === 'walking') this.updateWalking(state, playerScreen);
@@ -544,7 +690,7 @@ export class GameUI {
       [this.introScreen, state.mode === 'intro'],
       [this.levelSelectScreen, state.mode === 'level-select'],
       [this.briefingScreen, state.mode === 'level-briefing'],
-      [this.challengeHud, state.mode === 'challenge'],
+      [this.challengeHud, state.mode === 'challenge' || state.mode === 'challenge-failure'],
       [this.upgradeScreen, state.mode === 'upgrade'],
       [this.victoryScreen, state.mode === 'victory'],
       [this.walkingHud, state.mode === 'walking'],
@@ -568,6 +714,7 @@ export class GameUI {
     }
     if (state.mode !== 'interaction') this.interactionBalloons.replaceChildren();
     if (state.mode !== 'upgrade') this.lastUpgradeRenderKey = '';
+    if (state.mode !== 'upgrade') this.lastExperienceAnimationKey = '';
   }
 
   private updateChallengeFlow(state: GameState): void {
@@ -586,6 +733,9 @@ export class GameUI {
       (card.querySelector('.level-attempts') as HTMLElement).textContent = level.id === 4
         ? localized(level.objective)
         : `${CHALLENGE_UI.attempt} ${state.meta.attempts[level.id]} ${CHALLENGE_UI.times}`;
+      if (level.id !== 4) {
+        (card.querySelector(':scope > p') as HTMLElement).textContent = this.dynamicRule(level.id, getChallengeStats(state.meta, level.id));
+      }
     });
 
     const level = state.challenge.level;
@@ -599,15 +749,21 @@ export class GameUI {
       : level === 2
       ? [[CHALLENGE_UI.currentSpeed, `${stats.maxSpeed.toFixed(2)} m/s MAX`, state.meta.upgrades[2].maxSpeed], [getUpgradeCopy('power').name, `−${stats.hitDamage.toFixed(1)} m/s / HIT`, state.meta.upgrades[2].power]]
       : [[CHALLENGE_UI.mood, `${stats.maxMood}`, state.meta.upgrades[3].mood], [getUpgradeCopy('guard').name, `−${stats.hitDamage.toFixed(0)} / HIT`, state.meta.upgrades[3].guard]];
-    const briefingRenderKey = `${level}:${statLines.flat().join(':')}:${challenge.lastUpgrade ?? ''}`;
+    const dynamicGoal = this.dynamicGoal(level, stats);
+    const dynamicRule = this.dynamicRule(level, stats);
+    const growthLevel = state.meta.growthLevel[level];
+    const growthXp = state.meta.experience[level];
+    const growthRequired = getExperienceRequirement(level, growthLevel);
+    const briefingRenderKey = `${level}:${dynamicGoal}:${dynamicRule}:${statLines.flat().join(':')}:${challenge.lastUpgrade ?? ''}:${growthLevel}:${growthXp}`;
     if (this.lastBriefingRenderKey !== briefingRenderKey) {
       this.lastBriefingRenderKey = briefingRenderKey;
       this.briefingContent.style.setProperty('--level-accent', definition.accent);
       this.briefingContent.innerHTML = `
         <span class="eyebrow">${CHALLENGE_UI.briefingKicker} / 0${level}</span>
         <h2>${localized(definition.title)}</h2>
-        <p>${localized(definition.rule)}</p>
-        <div class="briefing-goal"><span>${CHALLENGE_UI.target}</span><strong>${localized(definition.objective)}</strong></div>
+        <p>${dynamicRule}</p>
+        <div class="briefing-goal"><span>${CHALLENGE_UI.target}</span><strong>${dynamicGoal}</strong></div>
+        <div class="briefing-growth"><span>${LANGUAGE === 'en' ? 'RUN GROWTH' : '本关成长'} · LV.${growthLevel}</span><strong>${growthXp} / ${growthRequired} XP</strong></div>
         <div class="briefing-stats">${statLines.map(([label, value, statLevel]) => `<div><span>${label}<em>LV.${statLevel}</em></span><strong>${value}</strong></div>`).join('')}</div>
         ${lastUpgrade ? `<div class="last-upgrade">↑ ${lastUpgrade.name} · ${lastUpgrade.effect}</div>` : ''}
         <small>${CHALLENGE_UI.controls}</small>
@@ -615,7 +771,8 @@ export class GameUI {
     }
 
     this.getElement('failure-reason').textContent = challenge.resultReason;
-    const upgradeRenderKey = `${level}:${definition.upgrades.map((key) => getUpgradeLevel(state.meta, level, key)).join(':')}`;
+    const canUpgrade = state.meta.upgradePoints[level] > 0;
+    const upgradeRenderKey = `${level}:${definition.upgrades.map((key) => getUpgradeLevel(state.meta, level, key)).join(':')}:${canUpgrade}`;
     if (state.mode === 'upgrade' && this.lastUpgradeRenderKey !== upgradeRenderKey) {
       this.lastUpgradeRenderKey = upgradeRenderKey;
       this.upgradeChoices.replaceChildren(...definition.upgrades.map((key) => {
@@ -628,18 +785,100 @@ export class GameUI {
         return button;
       }));
     }
+    this.upgradeChoices.classList.toggle('is-hidden', state.mode === 'upgrade' && !canUpgrade);
+    const retryWithoutUpgrade = this.getElement('retry-without-upgrade') as HTMLButtonElement;
+    retryWithoutUpgrade.classList.toggle('is-hidden', state.mode !== 'upgrade' || canUpgrade);
+    retryWithoutUpgrade.textContent = LANGUAGE === 'en' ? 'TRY AGAIN TO EARN MORE XP →' : '再试一次，继续积累经验 →';
+    this.getElement('upgrade-instruction').textContent = canUpgrade
+      ? (LANGUAGE === 'en' ? 'LEVEL UP! Choose one upgrade for this level.' : '成长等级提升！选择一项本关强化。')
+      : (LANGUAGE === 'en' ? 'Not enough XP to level up. Try again and keep building it.' : '经验尚未满级，本轮不能强化；再试一次继续积累。');
+
+    const leveledUp = challenge.growthLevelAfter > challenge.growthLevelBefore;
+    const experienceSettlement = this.getElement('experience-settlement');
+    experienceSettlement.classList.toggle('is-level-up', leveledUp);
+    this.getElement('experience-level').textContent = leveledUp
+      ? `${LANGUAGE === 'en' ? 'LEVEL UP' : '升级'} · LV.${challenge.growthLevelBefore} → LV.${challenge.growthLevelAfter}`
+      : `${LANGUAGE === 'en' ? 'RUN GROWTH' : '本关成长'} · LV.${challenge.growthLevelAfter}`;
+    this.getElement('experience-gained').textContent = `+${challenge.experienceGained} XP`;
+    this.getElement('experience-progress-copy').textContent = `${LANGUAGE === 'en' ? 'RUN PROGRESS' : '本轮进度'} ${Math.round(challenge.failureProgress * 100)}%`;
+    this.getElement('experience-next-copy').textContent = `${challenge.experienceAfter} / ${challenge.experienceRequiredAfter} XP`;
+    const experienceFill = this.getElement('experience-fill') as HTMLElement;
+    const experienceStart = Math.min(100, challenge.experienceBefore / Math.max(1, challenge.experienceRequiredBefore) * 100);
+    const experienceEnd = Math.min(100, challenge.experienceAfter / Math.max(1, challenge.experienceRequiredAfter) * 100);
+    experienceFill.style.width = `${experienceEnd}%`;
+    if (state.mode === 'upgrade') {
+      const animationKey = `${level}:${state.meta.attempts[level]}:${challenge.failureKind}:${challenge.experienceBefore}:${challenge.experienceAfter}:${challenge.growthLevelAfter}`;
+      if (this.lastExperienceAnimationKey !== animationKey) {
+        this.lastExperienceAnimationKey = animationKey;
+        experienceFill.getAnimations().forEach((animation) => animation.cancel());
+        const keyframes = leveledUp
+          ? [
+              { width: `${experienceStart}%`, offset: 0 },
+              { width: '100%', offset: 0.56 },
+              { width: '0%', offset: 0.64 },
+              { width: `${experienceEnd}%`, offset: 1 },
+            ]
+          : [{ width: `${experienceStart}%` }, { width: `${experienceEnd}%` }];
+        experienceFill.animate(keyframes, {
+          duration: leveledUp ? 1800 : 950,
+          easing: leveledUp ? 'linear' : 'cubic-bezier(.2,.8,.2,1)',
+        });
+        this.getElement('experience-gained').animate(
+          [{ opacity: 0, transform: 'translateY(7px) scale(.86)' }, { opacity: 1, transform: 'translateY(0) scale(1)' }],
+          { duration: 520, delay: 180, fill: 'backwards', easing: 'cubic-bezier(.2,.8,.2,1)' },
+        );
+      }
+    }
 
     this.getElement('victory-summary').textContent = `${localized(definition.title)} · ${CHALLENGE_UI.attempt} ${state.meta.attempts[level]} ${CHALLENGE_UI.times}`;
     this.getElement('unlock-notice').classList.toggle('is-hidden', completedCount < 3);
 
     this.getElement('challenge-level-index').textContent = `LEVEL 0${level}`;
     this.getElement('challenge-title').textContent = localized(definition.title);
-    this.getElement('challenge-objective').textContent = localized(definition.objective);
+    this.getElement('challenge-objective').textContent = dynamicGoal;
     this.getElement('challenge-time').textContent = Math.max(0, challenge.timeLimit - challenge.time).toFixed(1);
     this.getElement('challenge-distance').textContent = challenge.distance.toFixed(0);
     this.getElement('challenge-current-speed').textContent = challenge.currentSpeed.toFixed(1);
     this.getElement('challenge-target-speed').textContent = challenge.targetSpeed.toFixed(1);
     this.getElement('challenge-hits').textContent = String(challenge.hitCount);
+    const shortfall = Math.max(0, challenge.finishDistance - challenge.distance);
+    const arrivedEarly = challenge.failureKind === 'arrived-early';
+    const failureKicker = arrivedEarly ? (LANGUAGE === 'en' ? 'TOO SOON' : '提前抵达终点')
+      : level === 1 ? (LANGUAGE === 'en' ? 'IMPACT' : '碰撞发生')
+        : level === 2 ? (LANGUAGE === 'en' ? 'TIME IS UP' : '天亮了')
+          : (LANGUAGE === 'en' ? 'HEART BROKEN' : '心情见底');
+    const failureTitle = arrivedEarly ? (LANGUAGE === 'en' ? 'You arrived too early.' : '你到得太早了。')
+      : level === 1 ? (LANGUAGE === 'en' ? 'You hit someone.' : '你撞上了。')
+        : level === 2 ? (LANGUAGE === 'en' ? `${shortfall.toFixed(1)}m short` : `还差 ${shortfall.toFixed(1)} 米`)
+          : (LANGUAGE === 'en' ? 'You could not hold it in.' : '你忍不住哭了出来。');
+    const failureDetail = arrivedEarly
+      ? (LANGUAGE === 'en' ? `Only ${challenge.time.toFixed(1)} / ${challenge.timeLimit}s spent on the road` : `只在路上待了 ${challenge.time.toFixed(1)} / ${challenge.timeLimit} 秒`)
+      : level === 1 ? (LANGUAGE === 'en' ? 'The collision ended this run.' : '这次碰撞结束了本轮挑战。')
+        : level === 2 ? (LANGUAGE === 'en' ? `${challenge.distance.toFixed(1)} / ${challenge.finishDistance}m reached` : `本轮走了 ${challenge.distance.toFixed(1)} / ${challenge.finishDistance} 米`)
+          : (LANGUAGE === 'en' ? 'Your heart broke, and the tears came.' : '心碎了，眼泪已经止不住了。');
+    const persistentFeedback = this.getElement('persistent-failure-feedback');
+    persistentFeedback.className = `persistent-failure-feedback is-level-${level}${arrivedEarly ? ' is-arrived-early' : ''}`;
+    this.getElement('persistent-failure-icon').textContent = arrivedEarly ? '⚑' : level === 1 ? '◎' : level === 2 ? '━' : '♥';
+    this.getElement('persistent-failure-kicker').textContent = failureKicker;
+    this.getElement('persistent-failure-title').textContent = failureTitle;
+    this.getElement('persistent-failure-detail').textContent = failureDetail;
+    const failureSequence = this.getElement('challenge-failure-sequence');
+    const showingFailure = state.mode === 'challenge-failure';
+    failureSequence.classList.toggle('is-hidden', !showingFailure);
+    failureSequence.classList.toggle('is-level-1', showingFailure && level === 1);
+    failureSequence.classList.toggle('is-level-2', showingFailure && level === 2);
+    failureSequence.classList.toggle('is-level-3', showingFailure && level === 3 && !arrivedEarly);
+    failureSequence.classList.toggle('is-arrived-early', showingFailure && arrivedEarly);
+    if (showingFailure) {
+      this.getElement('failure-sequence-kicker').textContent = failureKicker;
+      this.getElement('failure-sequence-title').textContent = failureTitle;
+      this.getElement('failure-sequence-detail').textContent = level === 1
+        ? (LANGUAGE === 'en' ? 'Watch the collision play out…' : '先看清这次碰撞……')
+        : failureDetail;
+    }
+    this.root.querySelectorAll<HTMLButtonElement>('[data-challenge-axis="speed"]').forEach((button) => {
+      button.classList.toggle('is-latched', Number(button.dataset.challengeValue) === challenge.speedInput);
+    });
     const progress = level === 2
       ? challenge.distance / Math.max(1, challenge.finishDistance)
       : challenge.time / challenge.timeLimit;
@@ -655,13 +894,36 @@ export class GameUI {
       return rearDistance > 0 && rearDistance < 13 && Math.abs(npc.x - state.player.x) < 1.35;
     });
     this.getElement('rear-warning').classList.toggle('is-hidden', !rearThreat);
-    const showImpact = state.mode === 'challenge' && state.impactTime > 0;
-    const showImpactText = state.mode === 'challenge' && state.impactTextTime > 0 && Boolean(state.impactLabel);
+    const activeChallengeScene = state.mode === 'challenge' || state.mode === 'challenge-failure';
+    const showImpact = activeChallengeScene && state.impactTime > 0;
+    const showImpactText = activeChallengeScene && state.impactTextTime > 0 && Boolean(state.impactLabel);
     this.impactFlash.classList.toggle('is-hidden', !showImpact);
     this.impactFlash.classList.toggle('is-strong', showImpact);
     this.challengeImpactText.classList.toggle('is-hidden', !showImpactText);
     this.challengeImpactText.classList.toggle('is-strong', showImpactText);
     this.challengeImpactText.textContent = state.impactLabel;
+  }
+
+  private dynamicGoal(level: 1 | 2 | 3, stats: ReturnType<typeof getChallengeStats>): string {
+    if (LANGUAGE === 'en') {
+      if (level === 1) return `Survive ${stats.timeLimit}s with zero collisions`;
+      if (level === 2) return `Reach ${stats.finishDistance}m within ${stats.timeLimit}s`;
+      return `Stay short of ${stats.finishDistance}m after ${stats.timeLimit}s`;
+    }
+    if (level === 1) return `零碰撞生存 ${stats.timeLimit} 秒`;
+    if (level === 2) return `${stats.timeLimit} 秒内抵达 ${stats.finishDistance} 米`;
+    return `${stats.timeLimit} 秒后仍未走完 ${stats.finishDistance} 米`;
+  }
+
+  private dynamicRule(level: 1 | 2 | 3, stats: ReturnType<typeof getChallengeStats>): string {
+    if (LANGUAGE === 'en') {
+      if (level === 1) return `Control your pace and sidestep for ${stats.timeLimit}s. Any collision ends the run.`;
+      if (level === 2) return `Cover ${stats.finishDistance}m in ${stats.timeLimit}s. Collisions cut your speed; power reduces the loss.`;
+      return `Stay on the ${stats.finishDistance}m road for ${stats.timeLimit}s without finishing; faster walkers drain your mood.`;
+    }
+    if (level === 1) return `控制步速与左右移动，坚持 ${stats.timeLimit} 秒。任何碰撞都会立刻结束本轮。`;
+    if (level === 2) return `在 ${stats.timeLimit} 秒内跑完 ${stats.finishDistance} 米。碰撞会让你掉速，攻击力越高，损失越小。`;
+    return `你要走满 ${stats.timeLimit} 秒仍不到 ${stats.finishDistance} 米；被快人撞会消耗心情。`;
   }
 
   private updateWalking(state: GameState, playerScreen: { x: number; y: number; visible: boolean }): void {

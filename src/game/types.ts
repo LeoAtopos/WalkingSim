@@ -5,6 +5,7 @@ export type GameMode =
   | 'level-select'
   | 'level-briefing'
   | 'challenge'
+  | 'challenge-failure'
   | 'upgrade'
   | 'victory'
   | 'walking'
@@ -16,6 +17,7 @@ export type CollisionSide = 'ahead' | 'behind';
 export type ChallengeLevelId = 1 | 2 | 3;
 export type LevelId = ChallengeLevelId | 4;
 export type ChallengeUpgradeKey = 'response' | 'lateral' | 'maxSpeed' | 'power' | 'mood' | 'guard';
+export type ChallengeFailureKind = 'collision' | 'timeout' | 'arrived-early' | 'cried' | null;
 
 export interface SpeedDefinition {
   id: 'stopped' | 'slow' | 'normal' | 'brisk' | 'run';
@@ -51,6 +53,9 @@ export interface SpeechState {
 export interface MetaProgress {
   completed: Record<ChallengeLevelId, boolean>;
   attempts: Record<ChallengeLevelId, number>;
+  experience: Record<ChallengeLevelId, number>;
+  growthLevel: Record<ChallengeLevelId, number>;
+  upgradePoints: Record<ChallengeLevelId, number>;
   upgrades: {
     1: { response: number; lateral: number };
     2: { maxSpeed: number; power: number };
@@ -69,6 +74,7 @@ export interface ChallengeState {
   minSpeed: number;
   maxSpeed: number;
   speedResponse: number;
+  targetAdjustRate: number;
   lateralSpeed: number;
   speedInput: -1 | 0 | 1;
   lateralInput: -1 | 0 | 1;
@@ -77,6 +83,17 @@ export interface ChallengeState {
   hitDamage: number;
   hitCount: number;
   invulnerableTime: number;
+  failureElapsed: number;
+  failureDuration: number;
+  failureProgress: number;
+  experienceGained: number;
+  experienceBefore: number;
+  experienceAfter: number;
+  experienceRequiredBefore: number;
+  experienceRequiredAfter: number;
+  growthLevelBefore: number;
+  growthLevelAfter: number;
+  failureKind: ChallengeFailureKind;
   resultReason: string;
   lastUpgrade: ChallengeUpgradeKey | null;
 }

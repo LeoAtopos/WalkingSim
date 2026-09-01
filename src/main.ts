@@ -3,7 +3,7 @@ import { GameAudio } from './game/audio';
 import { applyDocumentLanguage, COPY, LANGUAGE } from './game/i18n';
 import { CrowdPhysics } from './game/physics';
 import { GameRenderer } from './game/renderer';
-import { WalkingSimulation } from './game/simulation';
+import { CHALLENGE_CROWD_HALF_WIDTH, WalkingSimulation } from './game/simulation';
 import { INTERACTION_TARGET, NPC_SPEED_MAX, NPC_SPEED_MIN, SPEEDS, SPEECH_CONTINUE_DELAY, type ChallengeUpgradeKey, type LevelId } from './game/types';
 import { GameUI } from './game/ui';
 
@@ -35,6 +35,7 @@ class WalkingSimApp {
       onSelectLevel: (level) => this.selectLevel(level),
       onBeginChallenge: () => this.beginChallenge(),
       onChooseUpgrade: (key) => this.chooseUpgrade(key),
+      onRetryChallenge: () => this.retryChallenge(),
       onReturnToLevels: () => this.returnToLevels(),
       onFinishVictory: () => this.finishVictory(),
       onChallengeInput: (axis, value) => this.simulation.setChallengeInput(axis, value),
@@ -110,6 +111,11 @@ class WalkingSimApp {
 
   private chooseUpgrade(key: ChallengeUpgradeKey): void {
     this.simulation.chooseUpgrade(key);
+    this.physics.reset(this.simulation.state);
+  }
+
+  private retryChallenge(): void {
+    this.simulation.retryChallenge();
     this.physics.reset(this.simulation.state);
   }
 
@@ -218,10 +224,16 @@ class WalkingSimApp {
       }
       if (this.simulation.state.mode === 'challenge') {
         const key = event.key.toLowerCase();
-        if (['w', 's', 'a', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(key)) {
+        if (['w', 'arrowup'].includes(key)) {
+          event.preventDefault();
+          if (!event.repeat) this.simulation.setChallengeInput('speed', 1);
+        } else if (['s', 'arrowdown'].includes(key)) {
+          event.preventDefault();
+          if (!event.repeat) this.simulation.setChallengeInput('speed', -1);
+        } else if (['a', 'd', 'arrowleft', 'arrowright'].includes(key)) {
           event.preventDefault();
           this.pressedKeys.add(key);
-          this.syncChallengeInput();
+          this.syncChallengeLateralInput();
         }
         return;
       }
@@ -238,11 +250,11 @@ class WalkingSimApp {
     window.addEventListener('keyup', (event) => {
       const key = event.key.toLowerCase();
       if (!this.pressedKeys.delete(key)) return;
-      this.syncChallengeInput();
+      this.syncChallengeLateralInput();
     });
     window.addEventListener('blur', () => {
       this.pressedKeys.clear();
-      this.syncChallengeInput();
+      this.syncChallengeLateralInput();
     });
 
     document.addEventListener('fullscreenchange', () => this.renderer.resize());
@@ -251,12 +263,9 @@ class WalkingSimApp {
     });
   }
 
-  private syncChallengeInput(): void {
-    const positiveSpeed = this.pressedKeys.has('w') || this.pressedKeys.has('arrowup');
-    const negativeSpeed = this.pressedKeys.has('s') || this.pressedKeys.has('arrowdown');
+  private syncChallengeLateralInput(): void {
     const positiveLateral = this.pressedKeys.has('d') || this.pressedKeys.has('arrowright');
     const negativeLateral = this.pressedKeys.has('a') || this.pressedKeys.has('arrowleft');
-    this.simulation.setChallengeInput('speed', positiveSpeed === negativeSpeed ? 0 : positiveSpeed ? 1 : -1);
     this.simulation.setChallengeInput('lateral', positiveLateral === negativeLateral ? 0 : positiveLateral ? 1 : -1);
   }
 
@@ -298,13 +307,33 @@ class WalkingSimApp {
           targetSpeed: Number(state.challenge.targetSpeed.toFixed(2)),
           speedRange: [state.challenge.minSpeed, state.challenge.maxSpeed],
           speedResponse: state.challenge.speedResponse,
+          targetAdjustRate: state.challenge.targetAdjustRate,
           lateralSpeed: state.challenge.lateralSpeed,
           input: { speed: state.challenge.speedInput, lateral: state.challenge.lateralInput },
           mood: state.challenge.mood,
           maxMood: state.challenge.maxMood,
           hitDamage: state.challenge.hitDamage,
           hits: state.challenge.hitCount,
+          experience: {
+            progressAtFailure: Number(state.challenge.failureProgress.toFixed(3)),
+            gained: state.challenge.experienceGained,
+            before: state.challenge.experienceBefore,
+            after: state.challenge.experienceAfter,
+            requiredBefore: state.challenge.experienceRequiredBefore,
+            requiredAfter: state.challenge.experienceRequiredAfter,
+            levelBefore: state.challenge.growthLevelBefore,
+            levelAfter: state.challenge.growthLevelAfter,
+            availableUpgradePoints: state.meta.upgradePoints[state.challenge.level],
+          },
+          failureSequence: state.mode === 'challenge-failure' ? {
+            elapsed: Number(state.challenge.failureElapsed.toFixed(2)),
+            duration: state.challenge.failureDuration,
+            remainingMeters: state.challenge.level === 2
+              ? Number(Math.max(0, state.challenge.finishDistance - state.challenge.distance).toFixed(2))
+              : null,
+          } : null,
           resultReason: state.challenge.resultReason || null,
+          failureKind: state.challenge.failureKind,
           lastUpgrade: state.challenge.lastUpgrade,
         } : null,
         exitConfirmationOpen: this.ui.isExitConfirmationOpen(),
@@ -361,12 +390,22 @@ class WalkingSimApp {
           center: state.npcs.filter((npc) => Math.abs(npc.targetX) < 1.35).length,
           middle: state.npcs.filter((npc) => Math.abs(npc.targetX) >= 1.35 && Math.abs(npc.targetX) < 2.7).length,
           edges: state.npcs.filter((npc) => Math.abs(npc.targetX) >= 2.7).length,
+          uniformSixths: Array.from({ length: 6 }, (_, bin) => state.npcs.filter((npc) => {
+            const normalized = (npc.targetX + CHALLENGE_CROWD_HALF_WIDTH) / (CHALLENGE_CROWD_HALF_WIDTH * 2);
+            return Math.min(5, Math.max(0, Math.floor(normalized * 6))) === bin;
+          }).length),
+          outerBands: {
+            left: state.npcs.filter((npc) => npc.targetX < -3.6).length,
+            right: state.npcs.filter((npc) => npc.targetX > 3.6).length,
+          },
         },
         collisions: { minor: state.minorBumps, strong: state.strongCollisions, activeImpact: state.impactTime > 0 },
         crowd: {
           total: state.npcs.length,
           nearbyAhead: state.npcs.filter((npc) => npc.z < state.player.z && npc.z > state.player.z - 35).length,
           nearbyBehind: state.npcs.filter((npc) => npc.z > state.player.z && npc.z < state.player.z + 35).length,
+          nearestAhead: Math.min(...state.npcs.filter((npc) => npc.z < state.player.z).map((npc) => state.player.z - npc.z)),
+          nearestBehind: Math.min(...state.npcs.filter((npc) => npc.z > state.player.z).map((npc) => npc.z - state.player.z)),
         },
         challengeVisuals: this.renderer.getChallengeVisualDebugState(state),
         collisionContacts: this.physics.getContactDebugState(),
@@ -398,10 +437,13 @@ class WalkingSimApp {
     const state = this.simulation.state;
     if (this.ui.isExitConfirmationOpen()) return [COPY.debug.exitCancel, COPY.debug.exitConfirm];
     if (state.mode === 'intro') return [COPY.debug.start, COPY.debug.share];
-    if (state.mode === 'level-select') return ['click #level-card-1..4: select an unlocked level'];
+    if (state.mode === 'level-select') return ['click #level-card-1..4: select an unlocked level', 'click #balance-editor-open: edit level values'];
     if (state.mode === 'level-briefing') return ['click #begin-challenge: start run', 'click #briefing-back: level select'];
-    if (state.mode === 'challenge') return ['hold W/S: change target speed', 'hold A/D: move laterally', 'Escape: leave run'];
-    if (state.mode === 'upgrade') return ['click one #upgrade-* choice', 'click #upgrade-back: level select'];
+    if (state.mode === 'challenge') return ['press W/S once: latch acceleration or braking', 'hold A/D: move laterally', 'Escape: leave run'];
+    if (state.mode === 'challenge-failure') return ['wait for the failure sequence to finish'];
+    if (state.mode === 'upgrade') return state.challenge.level && state.meta.upgradePoints[state.challenge.level] > 0
+      ? ['click one #upgrade-* choice', 'click #upgrade-back: level select']
+      : ['click #retry-without-upgrade: retry without upgrading', 'click #upgrade-back: level select'];
     if (state.mode === 'victory') return ['click #victory-back: level select'];
     if (state.mode === 'walking') {
       if (state.pendingEvaluation) return [0, 1, 2].map((index) => COPY.debug.chooseEvaluation(index));

@@ -1,6 +1,6 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import { SPEEDS, STRONG_COLLISION_SPEED_GAP, type CollisionSide, type GameState, type WalkerState } from './types';
-import { randomStreetX, type WalkingSimulation } from './simulation';
+import { CHALLENGE_CROWD_HALF_WIDTH, randomStreetX, stratifiedStreetX, type WalkingSimulation } from './simulation';
 
 interface PhysicsWalker {
   id: string;
@@ -227,7 +227,7 @@ export class CrowdPhysics {
 
       npc.recycles += 1;
       npc.targetX = state.mode === 'challenge'
-        ? Math.max(-3.6, Math.min(3.6, randomStreetX(index * 7.93 + npc.recycles * 19.17)))
+        ? stratifiedStreetX(index, index * 7.93 + npc.recycles * 19.17, CHALLENGE_CROWD_HALF_WIDTH)
         : randomStreetX(index * 7.93 + npc.recycles * 19.17);
       npc.x = npc.targetX;
       npc.z = nextZ + ((index * 31 + npc.recycles * 17) % 11) - 5;

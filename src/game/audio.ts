@@ -403,6 +403,7 @@ export class GameAudio {
       'level-select': { music: 0.32, ambience: 0.025 },
       'level-briefing': { music: 0.31, ambience: 0.1 },
       challenge: { music: 0.42, ambience: 0.2 },
+      'challenge-failure': { music: 0.12, ambience: 0.08 },
       upgrade: { music: 0.2, ambience: 0.08 },
       victory: { music: 0.46, ambience: 0.1 },
       walking: { music: 0.38, ambience: 0.18 },

@@ -6,6 +6,7 @@ import {
   STRONG_COLLISION_SPEED_GAP,
   TASK_DURATION,
   type ChallengeLevelId,
+  type ChallengeFailureKind,
   type ChallengeState,
   type ChallengeUpgradeKey,
   type CollisionSide,
@@ -16,26 +17,32 @@ import {
   type WalkerState,
 } from './types';
 import { CHALLENGE_UI, getChallengeStats, getLevel } from './challenges';
-import { COPY } from './i18n';
+import { COPY, LANGUAGE } from './i18n';
+import { getExperienceRequirement, getExperienceReward } from './balance';
 
 const NPC_COLORS = [0xe96b5e, 0xf0ad4e, 0x59a884, 0x7658a5, 0xd97ea8, 0x426f9e, 0xc98e56];
 const META_STORAGE_KEY = 'walking-sim-roguelike-v1';
 export const NPC_COUNT = 84;
+export const CHALLENGE_CROWD_HALF_WIDTH = 4.15;
 
 function seededUnit(seed: number): number {
   const value = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
   return value - Math.floor(value);
 }
 
-export function randomStreetX(seed: number): number {
-  const signed = seededUnit(seed) * 2 - 1;
-  return Math.sign(signed) * Math.pow(Math.abs(signed), 6) * 4.05;
+export function randomStreetX(seed: number, halfWidth = CHALLENGE_CROWD_HALF_WIDTH): number {
+  return (seededUnit(seed) * 2 - 1) * halfWidth;
+}
+
+export function stratifiedStreetX(index: number, seed: number, halfWidth = CHALLENGE_CROWD_HALF_WIDTH): number {
+  const bandCount = 7;
+  const band = ((index * 3) % bandCount + bandCount) % bandCount;
+  const unit = (band + seededUnit(seed)) / bandCount;
+  return (unit * 2 - 1) * halfWidth;
 }
 
 function makeWalker(index: number): WalkerState {
-  const targetX = index % 7 === 1
-    ? (seededUnit(index * 2.31 + 0.8) - 0.5) * 0.75
-    : randomStreetX(index * 3.71 + 1.4);
+  const targetX = randomStreetX(index * 3.71 + 1.4);
   const ahead = index < 60;
   const localIndex = ahead ? index : index - 60;
   const zJitter = seededUnit(index * 5.17 + 2.2) * 0.9;
@@ -69,6 +76,9 @@ function freshMeta(): MetaProgress {
   return {
     completed: { 1: false, 2: false, 3: false },
     attempts: { 1: 0, 2: 0, 3: 0 },
+    experience: { 1: 0, 2: 0, 3: 0 },
+    growthLevel: { 1: 0, 2: 0, 3: 0 },
+    upgradePoints: { 1: 0, 2: 0, 3: 0 },
     upgrades: {
       1: { response: 0, lateral: 0 },
       2: { maxSpeed: 0, power: 0 },
@@ -86,12 +96,6 @@ function loadMeta(): MetaProgress {
       fallback.completed[level] = Boolean(parsed.completed?.[level]);
       fallback.attempts[level] = 0;
     });
-    fallback.upgrades[1].response = Math.max(0, Number(parsed.upgrades?.[1]?.response) || 0);
-    fallback.upgrades[1].lateral = Math.max(0, Number(parsed.upgrades?.[1]?.lateral) || 0);
-    fallback.upgrades[2].maxSpeed = Math.max(0, Number(parsed.upgrades?.[2]?.maxSpeed) || 0);
-    fallback.upgrades[2].power = Math.max(0, Number(parsed.upgrades?.[2]?.power) || 0);
-    fallback.upgrades[3].mood = Math.max(0, Number(parsed.upgrades?.[3]?.mood) || 0);
-    fallback.upgrades[3].guard = Math.max(0, Number(parsed.upgrades?.[3]?.guard) || 0);
   } catch {
     // A fresh run is still playable when storage is unavailable or malformed.
   }
@@ -110,6 +114,7 @@ function freshChallenge(): ChallengeState {
     minSpeed: 0,
     maxSpeed: 0,
     speedResponse: 0,
+    targetAdjustRate: 0,
     lateralSpeed: 0,
     speedInput: 0,
     lateralInput: 0,
@@ -118,6 +123,17 @@ function freshChallenge(): ChallengeState {
     hitDamage: 0,
     hitCount: 0,
     invulnerableTime: 0,
+    failureElapsed: 0,
+    failureDuration: 0,
+    failureProgress: 0,
+    experienceGained: 0,
+    experienceBefore: 0,
+    experienceAfter: 0,
+    experienceRequiredBefore: 0,
+    experienceRequiredAfter: 0,
+    growthLevelBefore: 0,
+    growthLevelAfter: 0,
+    failureKind: null,
     resultReason: '',
     lastUpgrade: null,
   };
@@ -166,7 +182,6 @@ export class WalkingSimulation {
     try {
       localStorage.setItem(META_STORAGE_KEY, JSON.stringify({
         completed: this.state.meta.completed,
-        upgrades: this.state.meta.upgrades,
       }));
     } catch {
       // Progress remains valid for the current session when storage is blocked.
@@ -209,7 +224,15 @@ export class WalkingSimulation {
 
   returnToLevelSelect(): void {
     const level = this.state.challenge.level;
-    if (level) this.state.meta.attempts[level] = 0;
+    if (level) {
+      this.state.meta.attempts[level] = 0;
+      this.state.meta.experience[level] = 0;
+      this.state.meta.growthLevel[level] = 0;
+      this.state.meta.upgradePoints[level] = 0;
+      if (level === 1) this.state.meta.upgrades[1] = { response: 0, lateral: 0 };
+      else if (level === 2) this.state.meta.upgrades[2] = { maxSpeed: 0, power: 0 };
+      else this.state.meta.upgrades[3] = { mood: 0, guard: 0 };
+    }
     this.state.mode = 'level-select';
     this.state.selectedLevel = null;
     this.state.challenge.speedInput = 0;
@@ -222,11 +245,18 @@ export class WalkingSimulation {
 
   chooseUpgrade(key: ChallengeUpgradeKey): void {
     const level = this.state.challenge.level;
-    if (this.state.mode !== 'upgrade' || !level || !getLevel(level).upgrades.includes(key)) return;
+    if (this.state.mode !== 'upgrade' || !level || this.state.meta.upgradePoints[level] < 1 || !getLevel(level).upgrades.includes(key)) return;
     const upgrades = this.state.meta.upgrades[level] as Partial<Record<ChallengeUpgradeKey, number>>;
     upgrades[key] = (upgrades[key] ?? 0) + 1;
-    this.saveMeta();
+    this.state.meta.upgradePoints[level] -= 1;
     this.configureChallenge(level, key);
+    this.state.mode = 'level-briefing';
+  }
+
+  retryChallenge(): void {
+    const level = this.state.challenge.level;
+    if (this.state.mode !== 'upgrade' || !level || this.state.meta.upgradePoints[level] > 0) return;
+    this.configureChallenge(level);
     this.state.mode = 'level-briefing';
   }
 
@@ -247,12 +277,15 @@ export class WalkingSimulation {
     this.state.challenge = {
       ...freshChallenge(),
       level,
+      timeLimit: stats.timeLimit,
+      failureDuration: stats.failureDuration,
       finishDistance: stats.finishDistance,
       targetSpeed: initialSpeed,
       currentSpeed: initialSpeed,
       minSpeed: stats.minSpeed,
       maxSpeed: stats.maxSpeed,
       speedResponse: stats.response,
+      targetAdjustRate: stats.targetAdjustRate,
       lateralSpeed: stats.lateral,
       mood: stats.maxMood,
       maxMood: stats.maxMood,
@@ -274,28 +307,24 @@ export class WalkingSimulation {
   }
 
   private configureChallengeCrowd(level: ChallengeLevelId): void {
-    const laneSets = {
-      1: [0, -1.85, 1.85, 0.9, -0.9, 2.65, -2.65],
-      2: [0, 0.55, -0.55, 1.7, -1.7, 2.8, -2.8],
-      3: [0, 0.38, -0.38, 1.55, -1.55, 2.65, -2.65],
-    } as const;
+    const balance = getChallengeStats(this.state.meta, level);
+    const aheadCount = Math.max(0, Math.min(this.state.npcs.length, Math.round(balance.crowdAheadCount)));
     this.state.npcs.forEach((npc, index) => {
-      const aheadCount = level === 1 ? 66 : level === 2 ? 72 : 42;
       const ahead = index < aheadCount;
       const localIndex = ahead ? index : index - aheadCount;
-      const lane = laneSets[level][localIndex % laneSets[level].length];
-      npc.x = lane;
-      npc.targetX = lane;
+      const uniformX = stratifiedStreetX(index + level * 5, index * 5.83 + level * 31.17, CHALLENGE_CROWD_HALF_WIDTH);
+      npc.x = uniformX;
+      npc.targetX = uniformX;
       npc.avoidanceTime = 0;
       npc.recycles = 0;
       if (level === 1) {
-        npc.z = ahead ? -12 - localIndex * 3.05 : 12 + localIndex * 4.2;
+        npc.z = ahead ? -balance.crowdAheadStart - localIndex * balance.crowdAheadSpacing : balance.crowdBehindStart + localIndex * balance.crowdBehindSpacing;
         npc.speed = 6.8 + (index % 5) * 1.35;
       } else if (level === 2) {
-        npc.z = ahead ? -5.5 - localIndex * 2.9 : 12 + localIndex * 4.4;
+        npc.z = ahead ? -balance.crowdAheadStart - localIndex * balance.crowdAheadSpacing : balance.crowdBehindStart + localIndex * balance.crowdBehindSpacing;
         npc.speed = 8.2 + (index % 6) * 1.2;
       } else {
-        npc.z = ahead ? -4.5 - localIndex * 3.25 : 10 + localIndex * 3.6;
+        npc.z = ahead ? -balance.crowdAheadStart - localIndex * balance.crowdAheadSpacing : balance.crowdBehindStart + localIndex * balance.crowdBehindSpacing;
         npc.speed = ahead ? 4.8 + (index % 5) * 1.1 : 10.8 + (index % 5) * 1.05;
       }
     });
@@ -417,7 +446,7 @@ export class WalkingSimulation {
     this.state.impactTextTime = 1.2;
     this.state.impactStrength = 0.82;
     if (challenge.level === 1) {
-      this.failChallenge(CHALLENGE_UI.reasons.touched);
+      this.failChallenge(CHALLENGE_UI.reasons.touched, 'collision');
       return;
     }
     if (challenge.level === 2) {
@@ -428,7 +457,7 @@ export class WalkingSimulation {
     }
     challenge.mood = Math.max(0, challenge.mood - challenge.hitDamage);
     this.state.impactLabel = `−${Math.round(challenge.hitDamage)}`;
-    if (challenge.mood <= 0) this.failChallenge(CHALLENGE_UI.reasons.cried);
+    if (challenge.mood <= 0) this.failChallenge(CHALLENGE_UI.reasons.cried, 'cried');
   }
 
   private startNpcAvoidance(npcId: string, relativeSpeed: number): void {
@@ -459,6 +488,7 @@ export class WalkingSimulation {
     state.impactTextTime = Math.max(0, state.impactTextTime - dt);
     if (state.impactTime === 0 && state.impactTextTime === 0) state.impactStrength = 0;
     if (state.mode === 'challenge') this.updateChallenge(dt);
+    if (state.mode === 'challenge-failure') this.updateChallengeFailure(dt);
     if (state.mode === 'walking') this.updateWalking(dt);
   }
 
@@ -467,10 +497,9 @@ export class WalkingSimulation {
     if (!challenge.level) return;
     challenge.time = Math.min(challenge.timeLimit, challenge.time + dt);
     challenge.invulnerableTime = Math.max(0, challenge.invulnerableTime - dt);
-    const targetAdjustRate = challenge.level === 2 ? 16 : 7.5;
     challenge.targetSpeed = Math.max(
       challenge.minSpeed,
-      Math.min(challenge.maxSpeed, challenge.targetSpeed + challenge.speedInput * targetAdjustRate * dt),
+      Math.min(challenge.maxSpeed, challenge.targetSpeed + challenge.speedInput * challenge.targetAdjustRate * dt),
     );
     const delta = challenge.targetSpeed - challenge.currentSpeed;
     const change = Math.sign(delta) * Math.min(Math.abs(delta), challenge.speedResponse * dt);
@@ -484,19 +513,66 @@ export class WalkingSimulation {
       this.winChallenge();
     } else if (challenge.level === 2) {
       if (challenge.distance >= challenge.finishDistance) this.winChallenge();
-      else if (challenge.time >= challenge.timeLimit) this.failChallenge(CHALLENGE_UI.reasons.timeout);
+      else if (challenge.time >= challenge.timeLimit) this.failChallenge(CHALLENGE_UI.reasons.timeout, 'timeout');
     } else if (challenge.level === 3) {
-      if (challenge.distance >= challenge.finishDistance) this.failChallenge(CHALLENGE_UI.reasons.arrivedEarly);
+      if (challenge.distance >= challenge.finishDistance) this.failChallenge(CHALLENGE_UI.reasons.arrivedEarly, 'arrived-early');
       else if (challenge.time >= challenge.timeLimit) this.winChallenge();
     }
   }
 
-  private failChallenge(reason: string): void {
+  private failChallenge(reason: string, kind: Exclude<ChallengeFailureKind, null>): void {
     if (this.state.mode !== 'challenge') return;
-    this.state.challenge.resultReason = reason;
-    this.state.challenge.speedInput = 0;
-    this.state.challenge.lateralInput = 0;
-    this.state.mode = 'upgrade';
+    const challenge = this.state.challenge;
+    challenge.resultReason = reason;
+    challenge.failureKind = kind;
+    challenge.failureElapsed = 0;
+    challenge.speedInput = 0;
+    challenge.lateralInput = 0;
+    challenge.targetSpeed = 0;
+    challenge.currentSpeed = 0;
+    this.state.player.speed = 0;
+    this.awardFailureExperience(challenge.level);
+    if (challenge.level === 1) {
+      this.state.impactLabel = LANGUAGE === 'en' ? 'COLLISION!' : '碰撞！';
+      this.state.impactTextTime = Math.max(this.state.impactTextTime, challenge.failureDuration);
+    }
+    this.state.mode = 'challenge-failure';
+  }
+
+  private awardFailureExperience(level: ChallengeLevelId | null): void {
+    if (!level) return;
+    const challenge = this.state.challenge;
+    const progress = level === 2
+      ? challenge.distance / Math.max(1, challenge.finishDistance)
+      : challenge.time / Math.max(1, challenge.timeLimit);
+    const normalizedProgress = Math.max(0, Math.min(1, progress));
+    const levelBefore = this.state.meta.growthLevel[level];
+    const xpBefore = this.state.meta.experience[level];
+    const requiredBefore = getExperienceRequirement(level, levelBefore);
+    const gained = getExperienceReward(level, normalizedProgress);
+    let currentLevel = levelBefore;
+    let currentXp = xpBefore + gained;
+    while (currentXp >= getExperienceRequirement(level, currentLevel)) {
+      currentXp -= getExperienceRequirement(level, currentLevel);
+      currentLevel += 1;
+      this.state.meta.upgradePoints[level] += 1;
+    }
+    this.state.meta.experience[level] = currentXp;
+    this.state.meta.growthLevel[level] = currentLevel;
+    challenge.failureProgress = normalizedProgress;
+    challenge.experienceGained = gained;
+    challenge.experienceBefore = xpBefore;
+    challenge.experienceAfter = currentXp;
+    challenge.experienceRequiredBefore = requiredBefore;
+    challenge.experienceRequiredAfter = getExperienceRequirement(level, currentLevel);
+    challenge.growthLevelBefore = levelBefore;
+    challenge.growthLevelAfter = currentLevel;
+  }
+
+  private updateChallengeFailure(dt: number): void {
+    const challenge = this.state.challenge;
+    challenge.failureElapsed = Math.min(challenge.failureDuration, challenge.failureElapsed + dt);
+    if (challenge.failureElapsed >= challenge.failureDuration) this.state.mode = 'upgrade';
   }
 
   private winChallenge(): void {
