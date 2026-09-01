@@ -452,8 +452,8 @@ export class GameRenderer {
   }
 
   update(state: GameState, dt: number): void {
-    const worldMode = ['level-briefing', 'challenge', 'challenge-failure', 'upgrade', 'victory', 'walking'].includes(state.mode);
-    const worldRunning = state.mode === 'challenge' || state.mode === 'challenge-failure' || (state.mode === 'walking' && !state.speech && !state.pendingEvaluation);
+    const worldMode = ['level-briefing', 'challenge', 'challenge-failure', 'challenge-victory', 'upgrade', 'victory', 'walking'].includes(state.mode);
+    const worldRunning = state.mode === 'challenge' || state.mode === 'challenge-failure' || state.mode === 'challenge-victory' || (state.mode === 'walking' && !state.speech && !state.pendingEvaluation);
     const sceneDt = worldRunning ? dt : 0;
     this.elapsed += sceneDt;
     this.worldGroup.visible = worldMode;
@@ -535,6 +535,13 @@ export class GameRenderer {
         playerRig.rightArm.rotation.x = -0.35 - sob * 0.08;
         playerRig.leftArm.rotation.z = 2.28 + sob * 0.08;
         playerRig.rightArm.rotation.z = -2.28 - sob * 0.08;
+      } else if (state.mode === 'challenge-victory') {
+        const cheer = Math.sin(state.challenge.victoryElapsed * 8);
+        playerRig.root.position.y = 0.08 + Math.max(0, cheer) * 0.09;
+        playerRig.root.rotation.z = cheer * 0.025;
+        playerRig.head.rotation.x = -0.12 + cheer * 0.025;
+        playerRig.leftArm.rotation.z = -2.32 - cheer * 0.08;
+        playerRig.rightArm.rotation.z = 2.32 + cheer * 0.08;
       } else {
         playerRig.head.rotation.x *= Math.pow(0.02, dt);
       }

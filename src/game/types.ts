@@ -6,6 +6,7 @@ export type GameMode =
   | 'level-briefing'
   | 'challenge'
   | 'challenge-failure'
+  | 'challenge-victory'
   | 'upgrade'
   | 'victory'
   | 'walking'
@@ -43,6 +44,7 @@ export interface WalkerState {
   scale: number;
   avoidanceTime: number;
   recycles: number;
+  randomSeed: number;
 }
 
 export interface SpeechState {
@@ -65,6 +67,7 @@ export interface MetaProgress {
 
 export interface ChallengeState {
   level: ChallengeLevelId | null;
+  crowdSeed: number;
   time: number;
   timeLimit: number;
   distance: number;
@@ -85,6 +88,8 @@ export interface ChallengeState {
   invulnerableTime: number;
   failureElapsed: number;
   failureDuration: number;
+  victoryElapsed: number;
+  victoryDuration: number;
   failureProgress: number;
   experienceGained: number;
   experienceBefore: number;

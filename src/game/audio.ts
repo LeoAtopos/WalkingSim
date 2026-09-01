@@ -104,9 +104,11 @@ export class GameAudio {
 
   update(state: GameState, dt: number): void {
     if (state.mode !== this.scene) {
+      const previousScene = this.scene;
       this.scene = state.mode;
       this.applySceneMix();
       this.footstepClock = 0;
+      if (previousScene === 'challenge' && state.mode === 'challenge-victory') this.playFinish();
     }
 
     const completedTasks = SPEEDS.filter((speed) => state.tasks[speed.id].complete).length;
@@ -404,6 +406,7 @@ export class GameAudio {
       'level-briefing': { music: 0.31, ambience: 0.1 },
       challenge: { music: 0.42, ambience: 0.2 },
       'challenge-failure': { music: 0.12, ambience: 0.08 },
+      'challenge-victory': { music: 0.5, ambience: 0.12 },
       upgrade: { music: 0.2, ambience: 0.08 },
       victory: { music: 0.46, ambience: 0.1 },
       walking: { music: 0.38, ambience: 0.18 },

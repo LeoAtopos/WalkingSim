@@ -112,6 +112,7 @@ class WalkingSimApp {
   private chooseUpgrade(key: ChallengeUpgradeKey): void {
     this.simulation.chooseUpgrade(key);
     this.physics.reset(this.simulation.state);
+    this.updateUi();
   }
 
   private retryChallenge(): void {
@@ -299,6 +300,7 @@ class WalkingSimApp {
         metaProgress: state.meta,
         challenge: state.challenge.level ? {
           level: state.challenge.level,
+          crowdSeed: state.challenge.crowdSeed,
           timeSeconds: Number(state.challenge.time.toFixed(2)),
           timeRemaining: Number((state.challenge.timeLimit - state.challenge.time).toFixed(2)),
           distanceMeters: Number(state.challenge.distance.toFixed(2)),
@@ -331,6 +333,10 @@ class WalkingSimApp {
             remainingMeters: state.challenge.level === 2
               ? Number(Math.max(0, state.challenge.finishDistance - state.challenge.distance).toFixed(2))
               : null,
+          } : null,
+          victorySequence: state.mode === 'challenge-victory' ? {
+            elapsed: Number(state.challenge.victoryElapsed.toFixed(2)),
+            duration: state.challenge.victoryDuration,
           } : null,
           resultReason: state.challenge.resultReason || null,
           failureKind: state.challenge.failureKind,
@@ -373,6 +379,7 @@ class WalkingSimApp {
           .slice(0, 8)
           .map((npc) => ({
             id: npc.id,
+            randomSeed: npc.randomSeed,
             x: Number(npc.x.toFixed(2)),
             targetX: Number(npc.targetX.toFixed(2)),
             relativeZ: Number((npc.z - state.player.z).toFixed(2)),
@@ -439,8 +446,9 @@ class WalkingSimApp {
     if (state.mode === 'intro') return [COPY.debug.start, COPY.debug.share];
     if (state.mode === 'level-select') return ['click #level-card-1..4: select an unlocked level', 'click #balance-editor-open: edit level values'];
     if (state.mode === 'level-briefing') return ['click #begin-challenge: start run', 'click #briefing-back: level select'];
-    if (state.mode === 'challenge') return ['press W/S once: latch acceleration or braking', 'hold A/D: move laterally', 'Escape: leave run'];
+    if (state.mode === 'challenge') return ['press W/S once or click #challenge-accelerate/#challenge-brake: latch acceleration or braking', 'hold A/D or touch lateral buttons: move laterally', 'Escape: leave run'];
     if (state.mode === 'challenge-failure') return ['wait for the failure sequence to finish'];
+    if (state.mode === 'challenge-victory') return ['wait for the victory sequence to finish'];
     if (state.mode === 'upgrade') return state.challenge.level && state.meta.upgradePoints[state.challenge.level] > 0
       ? ['click one #upgrade-* choice', 'click #upgrade-back: level select']
       : ['click #retry-without-upgrade: retry without upgrading', 'click #upgrade-back: level select'];

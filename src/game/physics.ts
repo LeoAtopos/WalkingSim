@@ -1,6 +1,6 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import { SPEEDS, STRONG_COLLISION_SPEED_GAP, type CollisionSide, type GameState, type WalkerState } from './types';
-import { CHALLENGE_CROWD_HALF_WIDTH, randomStreetX, stratifiedStreetX, type WalkingSimulation } from './simulation';
+import { CHALLENGE_CROWD_HALF_WIDTH, freshNpcRandomSeed, randomStreetX, stratifiedStreetX, type WalkingSimulation } from './simulation';
 
 interface PhysicsWalker {
   id: string;
@@ -226,11 +226,12 @@ export class CrowdPhysics {
       if (nextZ === null) return;
 
       npc.recycles += 1;
+      npc.randomSeed = freshNpcRandomSeed();
       npc.targetX = state.mode === 'challenge'
-        ? stratifiedStreetX(index, index * 7.93 + npc.recycles * 19.17, CHALLENGE_CROWD_HALF_WIDTH)
-        : randomStreetX(index * 7.93 + npc.recycles * 19.17);
+        ? stratifiedStreetX(index + state.challenge.crowdSeed % 7, npc.randomSeed, CHALLENGE_CROWD_HALF_WIDTH)
+        : randomStreetX(npc.randomSeed);
       npc.x = npc.targetX;
-      npc.z = nextZ + ((index * 31 + npc.recycles * 17) % 11) - 5;
+      npc.z = nextZ + (npc.randomSeed % 1100) / 100 - 5.5;
       npc.avoidanceTime = 0;
       this.playerContacts.delete(npc.id);
       this.contactAges.delete(npc.id);

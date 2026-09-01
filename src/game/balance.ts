@@ -3,6 +3,7 @@ import type { ChallengeLevelId } from './types';
 export interface LevelBalance {
   timeLimit: number;
   failureDuration: number;
+  victoryDuration: number;
   xpRewardMax: number;
   xpBaseRequirement: number;
   xpLinearGrowth: number;
@@ -33,25 +34,25 @@ const BALANCE_STORAGE_KEY = 'walking-sim-level-balance-v1';
 
 export const DEFAULT_BALANCE: BalanceConfig = {
   1: {
-    timeLimit: 20, failureDuration: 1.8, xpRewardMax: 50, xpBaseRequirement: 18, xpLinearGrowth: 12, xpQuadraticGrowth: 3,
-    finishDistance: 0, maxSpeed: 16, response: 2.2, targetAdjustRate: 7.5, lateral: 0.8,
-    hitDamage: 0, maxMood: 0, responseUpgrade: 0.9, lateralUpgrade: 0.45,
+    timeLimit: 40, failureDuration: 1.8, victoryDuration: 2.2, xpRewardMax: 50, xpBaseRequirement: 18, xpLinearGrowth: 12, xpQuadraticGrowth: 1,
+    finishDistance: 0, maxSpeed: 22, response: 4.2, targetAdjustRate: 6.5, lateral: 0.6,
+    hitDamage: 0, maxMood: 0, responseUpgrade: 0.4, lateralUpgrade: 0.45,
     maxSpeedUpgrade: 0, powerReduction: 0, moodUpgrade: 0, guardReduction: 0,
-    crowdAheadCount: 66, crowdAheadStart: 4, crowdAheadSpacing: 2.65, crowdBehindStart: 5, crowdBehindSpacing: 3.4,
+    crowdAheadCount: 66, crowdAheadStart: 4, crowdAheadSpacing: 0.65, crowdBehindStart: 8, crowdBehindSpacing: 4.4,
   },
   2: {
-    timeLimit: 20, failureDuration: 2.6, xpRewardMax: 50, xpBaseRequirement: 18, xpLinearGrowth: 12, xpQuadraticGrowth: 3,
-    finishDistance: 360, maxSpeed: 12, response: 3.2, targetAdjustRate: 3.2, lateral: 0.72,
-    hitDamage: 7.2, maxMood: 0, responseUpgrade: 0, lateralUpgrade: 0,
-    maxSpeedUpgrade: 1.6, powerReduction: 1.4, moodUpgrade: 0, guardReduction: 0,
-    crowdAheadCount: 72, crowdAheadStart: 5.5, crowdAheadSpacing: 2.9, crowdBehindStart: 12, crowdBehindSpacing: 4.4,
+    timeLimit: 20, failureDuration: 2.6, victoryDuration: 2.6, xpRewardMax: 70, xpBaseRequirement: 18, xpLinearGrowth: 12, xpQuadraticGrowth: 0,
+    finishDistance: 360, maxSpeed: 12, response: 2.2, targetAdjustRate: 3.2, lateral: 0.4,
+    hitDamage: 15, maxMood: 0, responseUpgrade: 0, lateralUpgrade: 0,
+    maxSpeedUpgrade: 15, powerReduction: 5, moodUpgrade: 0, guardReduction: 0,
+    crowdAheadCount: 72, crowdAheadStart: 2.5, crowdAheadSpacing: 2.9, crowdBehindStart: 5, crowdBehindSpacing: 4.4,
   },
   3: {
-    timeLimit: 20, failureDuration: 3.2, xpRewardMax: 50, xpBaseRequirement: 18, xpLinearGrowth: 12, xpQuadraticGrowth: 3,
-    finishDistance: 140, maxSpeed: 10, response: 2.2, targetAdjustRate: 2.2, lateral: 0.75,
-    hitDamage: 18, maxMood: 45, responseUpgrade: 0, lateralUpgrade: 0,
+    timeLimit: 30, failureDuration: 3.2, victoryDuration: 2.8, xpRewardMax: 70, xpBaseRequirement: 18, xpLinearGrowth: 8, xpQuadraticGrowth: 0,
+    finishDistance: 140, maxSpeed: 8, response: 2.2, targetAdjustRate: 2.2, lateral: 0.75,
+    hitDamage: 18, maxMood: 22, responseUpgrade: 0, lateralUpgrade: 0,
     maxSpeedUpgrade: 0, powerReduction: 0, moodUpgrade: 14, guardReduction: 4,
-    crowdAheadCount: 42, crowdAheadStart: 4.5, crowdAheadSpacing: 3.25, crowdBehindStart: 10, crowdBehindSpacing: 3.6,
+    crowdAheadCount: 62, crowdAheadStart: 2, crowdAheadSpacing: 2, crowdBehindStart: 2, crowdBehindSpacing: 2,
   },
 };
 
