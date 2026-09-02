@@ -109,6 +109,7 @@ export class GameAudio {
       this.applySceneMix();
       this.footstepClock = 0;
       if (previousScene === 'challenge' && state.mode === 'challenge-victory') this.playFinish();
+      if (previousScene === 'level-four-walk' && state.mode === 'level-four-reflection') this.playFinish();
     }
 
     const completedTasks = SPEEDS.filter((speed) => state.tasks[speed.id].complete).length;
@@ -125,7 +126,8 @@ export class GameAudio {
 
     const challengeWalking = state.mode === 'challenge' && state.challenge.currentSpeed > 0;
     const legacyWalking = state.mode === 'walking' && !state.speech && !state.pendingEvaluation && state.speedLevel > 0;
-    if (!challengeWalking && !legacyWalking) {
+    const fourthWalking = state.mode === 'level-four-walk' && state.fourth.selectedSpeed > 0;
+    if (!challengeWalking && !legacyWalking && !fourthWalking) {
       this.footstepClock = 0;
       return;
     }
@@ -133,11 +135,13 @@ export class GameAudio {
     this.footstepClock += Math.min(dt, 0.05);
     const paceRatio = challengeWalking
       ? Math.min(1, state.challenge.currentSpeed / Math.max(1, state.challenge.maxSpeed))
+      : fourthWalking
+        ? state.fourth.pace === 'fast' ? 1 : state.fourth.pace === 'slow' ? 0.2 : 0.55
       : state.speedLevel / (SPEEDS.length - 1);
     const interval = 0.66 - paceRatio * 0.46;
     if (this.footstepClock >= interval) {
       this.footstepClock %= interval;
-      this.playFootstep(challengeWalking ? paceRatio * 4 : state.speedLevel);
+      this.playFootstep(challengeWalking || fourthWalking ? paceRatio * 4 : state.speedLevel);
     }
   }
 
@@ -298,17 +302,18 @@ export class GameAudio {
 
   private playMusicNote(): void {
     if (!this.context || this.context.state !== 'running' || this.muted || this.scene === 'departed') return;
-    if (this.scene !== 'walking' && this.musicStep % 2 === 1) {
+    if (this.scene !== 'walking' && this.scene !== 'level-four-walk' && this.musicStep % 2 === 1) {
       this.musicStep += 1;
       return;
     }
     const walkingNotes = [293.66, 349.23, 392, 440, 392, 523.25, 440, 349.23];
     const portraitNotes = [220, 261.63, 293.66, 261.63];
-    const notes = this.scene === 'walking' ? walkingNotes : portraitNotes;
+    const activeWalkingScene = this.scene === 'walking' || this.scene === 'level-four-walk';
+    const notes = activeWalkingScene ? walkingNotes : portraitNotes;
     const frequency = notes[this.musicStep % notes.length];
     this.musicStep += 1;
     this.record('musicNote');
-    this.tone(frequency, this.scene === 'walking' ? 0.34 : 0.55, 0.04, 'sine', 0, frequency * 1.003, this.musicFilter);
+    this.tone(frequency, activeWalkingScene ? 0.34 : 0.55, 0.04, 'sine', 0, frequency * 1.003, this.musicFilter);
   }
 
   private playTaskComplete(): void {
@@ -409,6 +414,10 @@ export class GameAudio {
       'challenge-victory': { music: 0.5, ambience: 0.12 },
       upgrade: { music: 0.2, ambience: 0.08 },
       victory: { music: 0.46, ambience: 0.1 },
+      'level-four-choice': { music: 0.34, ambience: 0.12 },
+      'level-four-walk': { music: 0.4, ambience: 0.2 },
+      'level-four-reflection': { music: 0.16, ambience: 0.08 },
+      'level-four-ending': { music: 0.45, ambience: 0.1 },
       walking: { music: 0.38, ambience: 0.18 },
       return: { music: 0.28, ambience: 0.018 },
       interaction: { music: 0.22, ambience: 0.01 },

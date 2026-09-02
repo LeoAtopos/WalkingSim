@@ -69,7 +69,7 @@ export class CrowdPhysics {
 
   update(dt: number): void {
     const state = this.simulation.state;
-    if ((state.mode !== 'walking' && state.mode !== 'challenge') || (state.mode === 'walking' && (state.speech || state.pendingEvaluation))) return;
+    if ((state.mode !== 'walking' && state.mode !== 'challenge' && state.mode !== 'level-four-walk') || (state.mode === 'walking' && (state.speech || state.pendingEvaluation))) return;
 
     this.playerContacts.forEach((id) => {
       const age = (this.contactAges.get(id) ?? 0) + dt;
@@ -165,16 +165,20 @@ export class CrowdPhysics {
     const velocity = body.linvel();
     const isPlayer = walker.id === 'player';
     const challengePlayer = isPlayer && state.mode === 'challenge';
+    const fourthPlayer = isPlayer && state.mode === 'level-four-walk';
+    const directlyControlledPlayer = challengePlayer || fourthPlayer;
     const targetSpeed = isPlayer ? state.player.speed : walker.speed;
     const isAvoiding = !isPlayer && walker.avoidanceTime > 0;
-    const response = isPlayer ? (challengePlayer ? 28 : 12) : isAvoiding ? 8.2 : 2.35;
+    const response = isPlayer ? (directlyControlledPlayer ? 28 : 12) : isAvoiding ? 8.2 : 2.35;
     const amount = Math.min(1, dt * response);
     const lateralLimit = isPlayer ? 12 : isAvoiding ? 6.2 : 1.15;
     const lateralPull = (walker.targetX - position.x) * (isPlayer ? 14 : isAvoiding ? 4.8 : 1.65);
-    let targetXVelocity = challengePlayer
-      ? state.challenge.lateralInput * state.challenge.lateralSpeed
+    let targetXVelocity = directlyControlledPlayer
+      ? (challengePlayer
+          ? state.challenge.lateralInput * state.challenge.lateralSpeed
+          : state.fourth.lateralInput * state.fourth.lateralSpeed)
       : Math.max(-lateralLimit, Math.min(lateralLimit, lateralPull));
-    if (challengePlayer && ((position.x <= -4.05 && targetXVelocity < 0) || (position.x >= 4.05 && targetXVelocity > 0))) {
+    if (directlyControlledPlayer && ((position.x <= -4.05 && targetXVelocity < 0) || (position.x >= 4.05 && targetXVelocity > 0))) {
       targetXVelocity = 0;
     }
     const nextX = velocity.x + (targetXVelocity - velocity.x) * amount;
@@ -219,7 +223,7 @@ export class CrowdPhysics {
       if (state.mode === 'challenge' && state.challenge.level === 3) {
         if (npc.z < state.player.z - 44) nextZ = state.player.z + 26 + (index % 14) * 3.1;
       } else if (npc.z > state.player.z + 34) {
-        nextZ = state.player.z - 65 - (index % 28) * (state.mode === 'challenge' ? 3.2 : 3.5);
+        nextZ = state.player.z - 65 - (index % 28) * (state.mode === 'challenge' || state.mode === 'level-four-walk' ? 3.2 : 3.5);
       } else if (npc.z < state.player.z - (state.mode === 'walking' && state.speedLevel <= 1 ? 65 : 185)) {
         nextZ = state.player.z + 22 + (index % 4) * 5;
       }
@@ -227,8 +231,8 @@ export class CrowdPhysics {
 
       npc.recycles += 1;
       npc.randomSeed = freshNpcRandomSeed();
-      npc.targetX = state.mode === 'challenge'
-        ? stratifiedStreetX(index + state.challenge.crowdSeed % 7, npc.randomSeed, CHALLENGE_CROWD_HALF_WIDTH)
+      npc.targetX = state.mode === 'challenge' || state.mode === 'level-four-walk'
+        ? stratifiedStreetX(index + (state.mode === 'challenge' ? state.challenge.crowdSeed % 7 : 4), npc.randomSeed, CHALLENGE_CROWD_HALF_WIDTH)
         : randomStreetX(npc.randomSeed);
       npc.x = npc.targetX;
       npc.z = nextZ + (npc.randomSeed % 1100) / 100 - 5.5;

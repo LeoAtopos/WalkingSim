@@ -452,8 +452,8 @@ export class GameRenderer {
   }
 
   update(state: GameState, dt: number): void {
-    const worldMode = ['level-briefing', 'challenge', 'challenge-failure', 'challenge-victory', 'upgrade', 'victory', 'walking'].includes(state.mode);
-    const worldRunning = state.mode === 'challenge' || state.mode === 'challenge-failure' || state.mode === 'challenge-victory' || (state.mode === 'walking' && !state.speech && !state.pendingEvaluation);
+    const worldMode = ['level-briefing', 'challenge', 'challenge-failure', 'challenge-victory', 'upgrade', 'victory', 'level-four-choice', 'level-four-walk', 'level-four-reflection', 'level-four-ending', 'walking'].includes(state.mode);
+    const worldRunning = state.mode === 'challenge' || state.mode === 'challenge-failure' || state.mode === 'challenge-victory' || state.mode === 'level-four-walk' || (state.mode === 'walking' && !state.speech && !state.pendingEvaluation);
     const sceneDt = worldRunning ? dt : 0;
     this.elapsed += sceneDt;
     this.worldGroup.visible = worldMode;

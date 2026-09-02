@@ -1,7 +1,8 @@
-import { INTERACTION_TARGET, SPEEDS, SPEECH_CONTINUE_DELAY, TASK_DURATION, type ChallengeUpgradeKey, type GameState, type InteractionKind, type LevelId } from './types';
+import { INTERACTION_TARGET, SPEEDS, SPEECH_CONTINUE_DELAY, TASK_DURATION, type ChallengeUpgradeKey, type FourthEndingId, type FourthPace, type FourthResponse, type GameState, type InteractionKind, type LevelId } from './types';
 import { COPY, LANGUAGE, setLanguagePreference } from './i18n';
 import { CHALLENGE_UI, LEVELS, getChallengeStats, getLevel, getUpgradeCopy, getUpgradeLevel, getUpgradeStatValue, hasAvailableUpgrade, isUpgradeMaxed, localized } from './challenges';
-import { DEFAULT_BALANCE, getBalanceConfig, getExperienceRequirement, saveBalanceConfig, type BalanceConfig, type LevelBalance } from './balance';
+import { DEFAULT_BALANCE, getBalanceConfig, getExperienceRequirement, getFourthBalance, saveBalanceConfig, type BalanceConfig } from './balance';
+import { FOURTH_ENDING_IDS, FOURTH_PACE_ORDER, FOURTH_RESPONSE_ORDER, getFourthEndingCopy, getFourthPaceCopy, getFourthResponseCopy } from './fourth';
 
 interface UIActions {
   onStart: () => void;
@@ -11,6 +12,11 @@ interface UIActions {
   onRetryChallenge: () => void;
   onReturnToLevels: () => void;
   onFinishVictory: () => void;
+  onChooseFourthPace: (pace: FourthPace) => void;
+  onFourthLateralInput: (value: -1 | 0 | 1) => void;
+  onChooseFourthResponse: (response: FourthResponse) => void;
+  onFinishFourthEnding: () => void;
+  onResetProgress: () => void;
   onChallengeInput: (axis: 'speed' | 'lateral', value: -1 | 0 | 1) => void;
   onSpeedChange: (delta: number) => void;
   onDismissSpeech: () => void;
@@ -27,7 +33,9 @@ interface UIActions {
 
 const CHECKLIST_SPEEDS = [...SPEEDS].reverse();
 const SHARE_URL = 'https://leoatopos.github.io/WalkingSim/';
-const BALANCE_FIELDS: Record<1 | 2 | 3, readonly { key: keyof LevelBalance; label: string; unit: string; step: number }[]> = {
+type BalanceEditorLevel = 1 | 2 | 3 | 4;
+interface BalanceField { key: string; label: string; unit: string; step: number }
+const BALANCE_FIELDS: Record<BalanceEditorLevel, readonly BalanceField[]> = {
   1: [
     { key: 'timeLimit', label: '挑战时间', unit: '秒', step: 1 }, { key: 'failureDuration', label: '失败演出时长', unit: '秒', step: 0.1 }, { key: 'victoryDuration', label: '通关演出时长', unit: '秒', step: 0.1 },
     { key: 'xpRewardMax', label: '满进度经验奖励', unit: 'XP', step: 1 }, { key: 'xpBaseRequirement', label: '首次升级需求', unit: 'XP', step: 1 },
@@ -66,6 +74,20 @@ const BALANCE_FIELDS: Record<1 | 2 | 3, readonly { key: keyof LevelBalance; labe
     { key: 'crowdAheadSpacing', label: '前方纵向间距', unit: '米', step: 0.1 }, { key: 'crowdBehindStart', label: '后方最近距离', unit: '米', step: 0.1 },
     { key: 'crowdBehindSpacing', label: '后方纵向间距', unit: '米', step: 0.1 },
   ],
+  4: [
+    { key: 'duration', label: '行走持续时间', unit: '秒', step: 0.5 },
+    { key: 'fastSpeed', label: '快速选项速度', unit: 'm/s', step: 0.1 },
+    { key: 'normalSpeed', label: '平速选项速度', unit: 'm/s', step: 0.1 },
+    { key: 'slowSpeed', label: '慢速选项速度', unit: 'm/s', step: 0.1 },
+    { key: 'lateralSpeed', label: '左右移动速度', unit: 'm/s', step: 0.1 },
+    { key: 'npcMinSpeed', label: 'NPC 最低速度', unit: 'm/s', step: 0.1 },
+    { key: 'npcMaxSpeed', label: 'NPC 最高速度', unit: 'm/s', step: 0.1 },
+    { key: 'crowdAheadCount', label: '前方 NPC 数量', unit: '人', step: 1 },
+    { key: 'crowdAheadStart', label: '前方最近距离', unit: '米', step: 0.1 },
+    { key: 'crowdAheadSpacing', label: '前方纵向间距', unit: '米', step: 0.1 },
+    { key: 'crowdBehindStart', label: '后方最近距离', unit: '米', step: 0.1 },
+    { key: 'crowdBehindSpacing', label: '后方纵向间距', unit: '米', step: 0.1 },
+  ],
 };
 
 function formatUpgradeValue(key: ChallengeUpgradeKey, value: number): string {
@@ -93,7 +115,14 @@ export class GameUI {
   private readonly challengeHud: HTMLElement;
   private readonly upgradeScreen: HTMLElement;
   private readonly victoryScreen: HTMLElement;
+  private readonly fourthChoiceScreen: HTMLElement;
+  private readonly fourthWalkHud: HTMLElement;
+  private readonly fourthReflectionScreen: HTMLElement;
+  private readonly fourthEndingScreen: HTMLElement;
   private readonly levelGrid: HTMLElement;
+  private readonly endingGrid: HTMLElement;
+  private readonly endingConnection: SVGSVGElement;
+  private readonly endingConnectionPath: SVGPathElement;
   private readonly briefingContent: HTMLElement;
   private readonly upgradeChoices: HTMLElement;
   private readonly challengeImpactText: HTMLElement;
@@ -132,7 +161,7 @@ export class GameUI {
   private readonly balanceEditor: HTMLElement;
   private readonly balanceEditorFields: HTMLElement;
   private readonly balanceEditorStatus: HTMLElement;
-  private editingBalanceLevel: 1 | 2 | 3 = 1;
+  private editingBalanceLevel: BalanceEditorLevel = 1;
   private editingBalance: BalanceConfig = getBalanceConfig();
   private readonly taskElements = new Map<string, { row: HTMLElement; fill: HTMLElement; status: HTMLElement; time: HTMLElement }>();
   private lastInteractionCount = 0;
@@ -144,6 +173,9 @@ export class GameUI {
   private lastUpgradeRenderKey = '';
   private lastBriefingRenderKey = '';
   private lastExperienceAnimationKey = '';
+  private lastFourthReflectionPace: FourthPace | null = null;
+  private lastEndingGalleryKey = '';
+  private latestEndingForConnection: FourthEndingId | null = null;
 
   constructor(container: HTMLElement, private readonly actions: UIActions) {
     this.root = document.createElement('div');
@@ -173,9 +205,20 @@ export class GameUI {
           <span class="eyebrow">${CHALLENGE_UI.selectKicker}</span>
           <h1>${CHALLENGE_UI.selectTitle}</h1>
           <div class="level-clear-count"><span>${CHALLENGE_UI.clearCount}</span><strong id="level-clear-count">0 / 3</strong></div>
-          <button id="balance-editor-open" class="balance-editor-open" type="button"><span>⚙</span> 编辑关卡数值</button>
+          <div class="level-select-actions">
+            <button id="balance-editor-open" class="balance-editor-open" type="button"><span>⚙</span> 编辑关卡数值</button>
+            <button id="progress-reset-open" class="progress-reset-open" type="button"><span>↻</span> 重新开始</button>
+          </div>
         </div>
         <div id="level-grid" class="level-grid"></div>
+        <section id="fourth-ending-map" class="fourth-ending-map" aria-label="第四关结局图谱">
+          <header>
+            <div><span class="eyebrow">ENDING MAP / 09</span><h2>第四关结局</h2><p>每一种走法，都可能通向三种解释。</p></div>
+            <strong><b id="ending-unlocked-count">0</b> / 9</strong>
+          </header>
+          <div id="ending-grid" class="ending-grid"></div>
+        </section>
+        <svg id="ending-connection" class="ending-connection is-hidden" aria-hidden="true"><path id="ending-connection-path"></path></svg>
       </section>
 
       <section id="balance-editor" class="balance-editor is-hidden" aria-label="关卡数值编辑器">
@@ -185,6 +228,7 @@ export class GameUI {
             <button type="button" data-balance-level="1">01 不想碰碰</button>
             <button type="button" data-balance-level="2">02 着急赶路</button>
             <button type="button" data-balance-level="3">03 就想慢点走</button>
+            <button type="button" data-balance-level="4">04 走路模拟器</button>
           </nav>
           <div id="balance-editor-fields" class="balance-editor-fields"></div>
           <footer>
@@ -279,6 +323,61 @@ export class GameUI {
           <p id="victory-summary"></p>
           <div id="unlock-notice" class="unlock-notice is-hidden">✦ ${CHALLENGE_UI.allUnlocked}</div>
           <button id="victory-back" class="game-button primary-button" type="button">${CHALLENGE_UI.victoryBack} <span>→</span></button>
+        </div>
+      </section>
+
+      <section id="fourth-choice-screen" class="scene-ui fourth-overlay fourth-choice-ui is-hidden" aria-label="选择第四关步速">
+        <div class="fourth-panel fourth-choice-panel">
+          <span class="eyebrow">LEVEL 04 / CHOOSE YOUR PACE</span>
+          <h2>这一次，你想怎么走？</h2>
+          <p>选择一种步速，在人群里走完 <b id="fourth-choice-duration">10</b> 秒。途中只能左右移动。</p>
+          <div id="fourth-pace-choices" class="fourth-pace-choices">
+            ${FOURTH_PACE_ORDER.map((pace, index) => {
+              const copy = getFourthPaceCopy(pace);
+              return `<button type="button" data-fourth-pace="${pace}" class="is-${pace}"><span>0${index + 1}</span><strong>${copy.choice}</strong><small>${copy.description}</small><b class="fourth-pace-value"></b><i>→</i></button>`;
+            }).join('')}
+          </div>
+          <button id="fourth-choice-back" class="text-button" type="button">← 返回选关</button>
+        </div>
+      </section>
+
+      <section id="fourth-walk-hud" class="scene-ui fourth-walk-ui is-hidden" aria-label="第四关行走">
+        <div class="fourth-walk-objective"><span>LEVEL 04</span><strong id="fourth-walk-pace"></strong><small>只需左右移动，走完这一段路</small></div>
+        <div class="fourth-walk-timer"><strong id="fourth-walk-time">10.0</strong><span>秒</span></div>
+        <div class="fourth-walk-progress"><i id="fourth-walk-progress-fill"></i></div>
+        <div class="fourth-walk-stats">
+          <div><span>速度</span><strong><b id="fourth-walk-speed">0.0</b> m/s</strong></div>
+          <div><span>碰撞</span><strong><b id="fourth-walk-hits">0</b> 次</strong></div>
+        </div>
+        <div class="fourth-control-hint"><kbd>A</kbd><kbd>D</kbd> 左右移动</div>
+        <div id="fourth-touch-controls" class="fourth-touch-controls">
+          <button type="button" data-fourth-lateral="-1">←<span>左移</span></button>
+          <button type="button" data-fourth-lateral="1">→<span>右移</span></button>
+        </div>
+        <div id="fourth-impact-text" class="impact-text is-hidden" aria-live="polite"></div>
+      </section>
+
+      <section id="fourth-reflection-screen" class="scene-ui fourth-overlay fourth-reflection-ui is-hidden" aria-label="选择你如何理解这段路">
+        <div class="fourth-panel fourth-reflection-panel">
+          <span class="eyebrow">TEN SECONDS LATER</span>
+          <div class="fourth-reflection-summary"><b id="fourth-reflection-pace"></b><span id="fourth-reflection-stats"></span></div>
+          <h2 id="fourth-reflection-text"></h2>
+          <p>你准备怎样解释刚才发生的一切？</p>
+          <div id="fourth-response-choices" class="fourth-response-choices"></div>
+          <button id="fourth-reflection-back" class="text-button" type="button">← 放弃本次，返回选关</button>
+        </div>
+      </section>
+
+      <section id="fourth-ending-screen" class="scene-ui fourth-overlay fourth-ending-ui is-hidden" aria-label="第四关结局">
+        <div id="fourth-ending-panel" class="fourth-panel fourth-ending-panel">
+          <span class="eyebrow">ENDING UNLOCKED</span>
+          <div id="fourth-ending-mark" class="fourth-ending-mark" aria-hidden="true"></div>
+          <h2 id="fourth-ending-title"></h2>
+          <p id="fourth-ending-body"></p>
+          <div class="fourth-ending-route"><span id="fourth-ending-pace"></span><i>→</i><strong id="fourth-ending-response"></strong></div>
+          <div class="fourth-ending-actions">
+            <button id="fourth-ending-finish" class="game-button primary-button" type="button">查看结局图谱 <span>→</span></button>
+          </div>
         </div>
       </section>
 
@@ -380,6 +479,19 @@ export class GameUI {
         </div>
       </div>
 
+      <div id="progress-reset-confirmation" class="progress-reset-confirmation is-hidden" role="dialog" aria-modal="true" aria-label="重新开始游戏">
+        <div class="progress-reset-card">
+          <span class="eyebrow">START OVER</span>
+          <h2>重新开始游戏？</h2>
+          <p>将清除前三关通关记录、经验与强化，以及第四关已发现的结局。</p>
+          <strong>编辑关卡数值会保留，不会被清除。</strong>
+          <div class="progress-reset-actions">
+            <button id="progress-reset-cancel" class="game-button exit-cancel-button" type="button">取消</button>
+            <button id="progress-reset-confirm" class="game-button progress-reset-confirm-button" type="button">清除进度并重新开始 <span>↻</span></button>
+          </div>
+        </div>
+      </div>
+
       <div id="impact-flash" class="impact-flash is-hidden" aria-hidden="true"></div>
       <div id="cursor-follower" class="cursor-follower is-hidden" aria-hidden="true"><span id="cursor-glyph" class="cursor-glyph">✊</span></div>
     `;
@@ -391,7 +503,14 @@ export class GameUI {
     this.challengeHud = this.getElement('challenge-hud');
     this.upgradeScreen = this.getElement('upgrade-screen');
     this.victoryScreen = this.getElement('victory-screen');
+    this.fourthChoiceScreen = this.getElement('fourth-choice-screen');
+    this.fourthWalkHud = this.getElement('fourth-walk-hud');
+    this.fourthReflectionScreen = this.getElement('fourth-reflection-screen');
+    this.fourthEndingScreen = this.getElement('fourth-ending-screen');
     this.levelGrid = this.getElement('level-grid');
+    this.endingGrid = this.getElement('ending-grid');
+    this.endingConnection = this.root.querySelector<SVGSVGElement>('#ending-connection') as SVGSVGElement;
+    this.endingConnectionPath = this.root.querySelector<SVGPathElement>('#ending-connection-path') as SVGPathElement;
     this.briefingContent = this.getElement('briefing-content');
     this.upgradeChoices = this.getElement('upgrade-choices');
     this.challengeImpactText = this.getElement('challenge-impact-text');
@@ -432,6 +551,7 @@ export class GameUI {
     this.balanceEditorStatus = this.getElement('balance-editor-status');
 
     this.createLevelCards();
+    this.createEndingCards();
     this.createTaskRows();
     this.createSpeedDots();
     this.bindEvents();
@@ -461,6 +581,26 @@ export class GameUI {
         <div class="level-card-meta"><span class="level-objective"></span><b>→</b></div>
       `;
       this.levelGrid.append(card);
+    });
+  }
+
+  private createEndingCards(): void {
+    FOURTH_ENDING_IDS.forEach((endingId, index) => {
+      const copy = getFourthEndingCopy(endingId);
+      const card = document.createElement('article');
+      card.id = `ending-card-${endingId}`;
+      card.className = `ending-card is-locked is-${copy.response}`;
+      card.dataset.ending = endingId;
+      card.innerHTML = `
+        <span class="ending-slot">ENDING ${String(index + 1).padStart(2, '0')}</span>
+        <div class="ending-locked-content" aria-label="${LANGUAGE === 'en' ? 'Hidden ending' : '隐藏结局'}"><b>?</b><small>${LANGUAGE === 'en' ? 'NOT DISCOVERED' : '尚未发现'}</small></div>
+        <div class="ending-revealed-content">
+          <em>${copy.responseCopy.label}</em>
+          <strong>${copy.responseCopy.endingTitle}</strong>
+          <small>${copy.paceCopy.short} · ${copy.responseCopy.label}</small>
+        </div>
+      `;
+      this.endingGrid.append(card);
     });
   }
 
@@ -498,6 +638,15 @@ export class GameUI {
   private bindEvents(): void {
     this.getElement('start-btn').addEventListener('click', this.actions.onStart);
     this.getElement('balance-editor-open').addEventListener('click', () => this.openBalanceEditor());
+    this.getElement('progress-reset-open').addEventListener('click', () => {
+      this.getElement('progress-reset-confirmation').classList.remove('is-hidden');
+      requestAnimationFrame(() => (this.getElement('progress-reset-cancel') as HTMLButtonElement).focus());
+    });
+    this.getElement('progress-reset-cancel').addEventListener('click', () => this.getElement('progress-reset-confirmation').classList.add('is-hidden'));
+    this.getElement('progress-reset-confirm').addEventListener('click', () => {
+      this.getElement('progress-reset-confirmation').classList.add('is-hidden');
+      this.actions.onResetProgress();
+    });
     this.getElement('balance-editor-close').addEventListener('click', () => this.closeBalanceEditor());
     this.getElement('balance-editor-save').addEventListener('click', () => this.saveBalanceEditor());
     this.getElement('balance-editor-reset').addEventListener('click', () => {
@@ -509,7 +658,7 @@ export class GameUI {
       const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-balance-level]');
       if (!button) return;
       this.captureBalanceFields();
-      this.editingBalanceLevel = Number(button.dataset.balanceLevel) as 1 | 2 | 3;
+      this.editingBalanceLevel = Number(button.dataset.balanceLevel) as BalanceEditorLevel;
       this.renderBalanceEditor();
     });
     this.levelGrid.addEventListener('click', (event) => {
@@ -522,6 +671,30 @@ export class GameUI {
     this.getElement('upgrade-back').addEventListener('click', this.actions.onReturnToLevels);
     this.getElement('retry-without-upgrade').addEventListener('click', this.actions.onRetryChallenge);
     this.getElement('victory-back').addEventListener('click', this.actions.onFinishVictory);
+    this.getElement('fourth-pace-choices').addEventListener('click', (event) => {
+      const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-fourth-pace]');
+      if (button?.dataset.fourthPace) this.actions.onChooseFourthPace(button.dataset.fourthPace as FourthPace);
+    });
+    this.getElement('fourth-response-choices').addEventListener('click', (event) => {
+      const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-fourth-response]');
+      if (button?.dataset.fourthResponse) this.actions.onChooseFourthResponse(button.dataset.fourthResponse as FourthResponse);
+    });
+    this.getElement('fourth-choice-back').addEventListener('click', this.actions.onReturnToLevels);
+    this.getElement('fourth-reflection-back').addEventListener('click', this.actions.onReturnToLevels);
+    this.getElement('fourth-ending-finish').addEventListener('click', this.actions.onFinishFourthEnding);
+    this.root.querySelectorAll<HTMLButtonElement>('[data-fourth-lateral]').forEach((button) => {
+      const value = Number(button.dataset.fourthLateral) as -1 | 1;
+      const start = (event: PointerEvent) => {
+        event.preventDefault();
+        button.setPointerCapture?.(event.pointerId);
+        this.actions.onFourthLateralInput(value);
+      };
+      const stop = () => this.actions.onFourthLateralInput(0);
+      button.addEventListener('pointerdown', start);
+      button.addEventListener('pointerup', stop);
+      button.addEventListener('pointercancel', stop);
+      button.addEventListener('lostpointercapture', stop);
+    });
     this.upgradeChoices.addEventListener('click', (event) => {
       const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-upgrade]');
       if (button?.dataset.upgrade) this.actions.onChooseUpgrade(button.dataset.upgrade as ChallengeUpgradeKey);
@@ -584,6 +757,8 @@ export class GameUI {
       if (performance.now() < this.interactionUnlockAt) return;
       this.actions.onInteract();
     });
+    window.addEventListener('resize', () => this.updateEndingConnection());
+    this.levelSelectScreen.addEventListener('scroll', () => this.updateEndingConnection(), { passive: true });
   }
 
   private openBalanceEditor(): void {
@@ -600,9 +775,11 @@ export class GameUI {
 
   private captureBalanceFields(): void {
     this.balanceEditorFields.querySelectorAll<HTMLInputElement>('input[data-balance-key]').forEach((input) => {
-      const key = input.dataset.balanceKey as keyof LevelBalance;
+      const key = input.dataset.balanceKey;
       const value = Number(input.value);
-      if (Number.isFinite(value)) this.editingBalance[this.editingBalanceLevel][key] = Math.max(0, value);
+      if (!key || !Number.isFinite(value)) return;
+      const values = this.editingBalance[this.editingBalanceLevel] as unknown as Record<string, number>;
+      values[key] = Math.max(0, value);
     });
   }
 
@@ -611,10 +788,11 @@ export class GameUI {
       button.classList.toggle('is-active', Number(button.dataset.balanceLevel) === this.editingBalanceLevel);
     });
     const level = this.editingBalanceLevel;
+    const values = this.editingBalance[level] as unknown as Record<string, number>;
     this.balanceEditorFields.innerHTML = BALANCE_FIELDS[level].map((field) => `
       <label class="balance-field">
         <span>${field.label}<small>${field.unit}</small></span>
-        <input type="number" min="0" max="9999" step="${field.step}" value="${this.editingBalance[level][field.key]}" data-balance-key="${field.key}" />
+        <input type="number" min="0" max="9999" step="${field.step}" value="${values[field.key]}" data-balance-key="${field.key}" />
       </label>
     `).join('');
   }
@@ -705,12 +883,15 @@ export class GameUI {
     if (['level-select', 'level-briefing', 'challenge', 'challenge-failure', 'challenge-victory', 'upgrade', 'victory'].includes(state.mode)) {
       this.updateChallengeFlow(state, playerScreen);
     }
+    if (['level-four-choice', 'level-four-walk', 'level-four-reflection', 'level-four-ending'].includes(state.mode)) {
+      this.updateFourthFlow(state);
+    }
     if (state.mode === 'walking') this.updateWalking(state, playerScreen);
     if (state.mode === 'interaction') this.updateInteraction(state);
   }
 
   private updateMode(state: GameState): void {
-    if (state.mode !== 'walking') this.setExitConfirmation(false);
+    if (state.mode !== 'walking' && state.mode !== 'level-four-walk') this.setExitConfirmation(false);
     if (state.mode === 'intro' || state.mode === 'return') this.lastInteractionCount = 0;
     const screens: Array<[HTMLElement, boolean]> = [
       [this.introScreen, state.mode === 'intro'],
@@ -719,6 +900,10 @@ export class GameUI {
       [this.challengeHud, state.mode === 'challenge' || state.mode === 'challenge-failure' || state.mode === 'challenge-victory'],
       [this.upgradeScreen, state.mode === 'upgrade'],
       [this.victoryScreen, state.mode === 'victory'],
+      [this.fourthChoiceScreen, state.mode === 'level-four-choice'],
+      [this.fourthWalkHud, state.mode === 'level-four-walk'],
+      [this.fourthReflectionScreen, state.mode === 'level-four-reflection'],
+      [this.fourthEndingScreen, state.mode === 'level-four-ending'],
       [this.walkingHud, state.mode === 'walking'],
       [this.returnScreen, state.mode === 'return'],
       [this.interactionScreen, state.mode === 'interaction'],
@@ -732,7 +917,7 @@ export class GameUI {
     if (state.mode !== 'walking') this.speechCanContinue = false;
     this.cursorFollower.classList.toggle('is-hidden', state.mode !== 'interaction');
     document.body.classList.toggle('custom-cursor', state.mode === 'interaction');
-    if (state.mode !== 'walking') {
+    if (state.mode !== 'walking' && state.mode !== 'level-four-walk') {
       this.evaluationPanel.classList.add('is-hidden');
       this.lastPendingEvaluation = null;
       this.impactFlash.classList.add('is-hidden');
@@ -745,7 +930,9 @@ export class GameUI {
 
   private updateChallengeFlow(state: GameState, playerScreen: { x: number; y: number; visible: boolean }): void {
     const completedCount = ([1, 2, 3] as const).filter((level) => state.meta.completed[level]).length;
+    const unlockedEndingCount = FOURTH_ENDING_IDS.filter((endingId) => state.meta.fourthEndings[endingId]).length;
     this.getElement('level-clear-count').textContent = `${completedCount} / 3`;
+    this.updateEndingGallery(state);
     LEVELS.forEach((level) => {
       const card = this.getElement(`level-card-${level.id}`) as HTMLButtonElement;
       const locked = level.id === 4 && completedCount < 3;
@@ -755,10 +942,19 @@ export class GameUI {
       card.classList.toggle('is-cleared', cleared);
       (card.querySelector('.level-state') as HTMLElement).textContent = locked
         ? `${CHALLENGE_UI.locked} · ${completedCount}/3`
-        : cleared ? CHALLENGE_UI.cleared : CHALLENGE_UI.unlocked;
-      (card.querySelector('.level-objective') as HTMLElement).textContent = level.id === 4 ? localized(level.objective) : '';
+        : level.id === 4 && unlockedEndingCount > 0
+          ? `${unlockedEndingCount} / 9 ${LANGUAGE === 'en' ? 'ENDINGS' : '结局'}`
+          : cleared ? CHALLENGE_UI.cleared : CHALLENGE_UI.unlocked;
+      (card.querySelector('.level-objective') as HTMLElement).textContent = level.id === 4
+        ? (LANGUAGE === 'en' ? `${unlockedEndingCount} / 9 endings discovered` : `已发现 ${unlockedEndingCount} / 9 个结局`)
+        : '';
       if (level.id !== 4) {
         (card.querySelector(':scope > p') as HTMLElement).textContent = this.dynamicRule(level.id, getChallengeStats(state.meta, level.id));
+      } else {
+        const fourth = getFourthBalance();
+        (card.querySelector(':scope > p') as HTMLElement).textContent = LANGUAGE === 'en'
+          ? `Choose a fixed pace, sidestep through the crowd for ${fourth.duration}s, then decide how to understand the walk.`
+          : `选择一种固定步速，在人群中左右移动 ${fourth.duration} 秒，再决定如何理解这段路。`;
       }
     });
 
@@ -971,6 +1167,117 @@ export class GameUI {
     this.challengeImpactText.classList.toggle('is-hidden', !showImpactText);
     this.challengeImpactText.classList.toggle('is-strong', showImpactText);
     this.challengeImpactText.textContent = state.impactLabel;
+  }
+
+  private updateEndingGallery(state: GameState): void {
+    const latest = state.meta.latestFourthEnding && state.meta.fourthEndings[state.meta.latestFourthEnding]
+      ? state.meta.latestFourthEnding
+      : null;
+    const unlockedCount = FOURTH_ENDING_IDS.filter((endingId) => state.meta.fourthEndings[endingId]).length;
+    this.getElement('ending-unlocked-count').textContent = String(unlockedCount);
+    const galleryKey = `${FOURTH_ENDING_IDS.map((endingId) => state.meta.fourthEndings[endingId] ? '1' : '0').join('')}:${latest ?? ''}`;
+    FOURTH_ENDING_IDS.forEach((endingId) => {
+      const card = this.getElement(`ending-card-${endingId}`);
+      const unlocked = state.meta.fourthEndings[endingId];
+      const isLatest = latest === endingId;
+      const copy = getFourthEndingCopy(endingId);
+      card.classList.toggle('is-locked', !unlocked);
+      card.classList.toggle('is-unlocked', unlocked);
+      card.classList.toggle('is-latest', isLatest);
+      card.setAttribute('aria-label', unlocked
+        ? `${copy.responseCopy.endingTitle}${isLatest ? (LANGUAGE === 'en' ? ', latest ending' : '，最新结局') : ''}`
+        : (LANGUAGE === 'en' ? 'Undiscovered ending' : '未发现的结局'));
+    });
+    this.latestEndingForConnection = latest;
+    if (galleryKey !== this.lastEndingGalleryKey) {
+      this.lastEndingGalleryKey = galleryKey;
+      requestAnimationFrame(() => this.updateEndingConnection());
+    }
+  }
+
+  private updateEndingConnection(): void {
+    const latest = this.latestEndingForConnection;
+    const source = this.root.querySelector<HTMLElement>('#level-card-4');
+    const target = latest ? this.root.querySelector<HTMLElement>(`#ending-card-${latest}`) : null;
+    if (this.lastMode !== 'level-select' || !latest || !source || !target) {
+      this.endingConnection.classList.add('is-hidden');
+      return;
+    }
+    const containerRect = this.levelSelectScreen.getBoundingClientRect();
+    const sourceRect = source.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    const width = Math.max(1, this.levelSelectScreen.clientWidth);
+    const height = Math.max(this.levelSelectScreen.clientHeight, this.levelSelectScreen.scrollHeight);
+    const scrollLeft = this.levelSelectScreen.scrollLeft;
+    const scrollTop = this.levelSelectScreen.scrollTop;
+    const startX = sourceRect.left - containerRect.left + scrollLeft + sourceRect.width / 2;
+    const startY = sourceRect.bottom - containerRect.top + scrollTop - 8;
+    const endX = targetRect.left - containerRect.left + scrollLeft + targetRect.width / 2;
+    const endY = targetRect.top - containerRect.top + scrollTop + 8;
+    const bend = Math.max(44, Math.abs(endY - startY) * 0.36);
+    this.endingConnection.setAttribute('viewBox', `0 0 ${width} ${height}`);
+    this.endingConnection.style.height = `${height}px`;
+    this.endingConnectionPath.setAttribute('d', `M ${startX.toFixed(1)} ${startY.toFixed(1)} C ${startX.toFixed(1)} ${(startY + bend).toFixed(1)}, ${endX.toFixed(1)} ${(endY - bend).toFixed(1)}, ${endX.toFixed(1)} ${endY.toFixed(1)}`);
+    this.endingConnection.classList.remove('is-hidden');
+  }
+
+  private updateFourthFlow(state: GameState): void {
+    const fourth = state.fourth;
+    const balance = getFourthBalance();
+    this.getElement('fourth-choice-duration').textContent = String(balance.duration);
+    this.getElement('fourth-pace-choices').querySelectorAll<HTMLElement>('[data-fourth-pace]').forEach((button) => {
+      const pace = button.dataset.fourthPace as FourthPace;
+      const speed = pace === 'fast' ? balance.fastSpeed : pace === 'slow' ? balance.slowSpeed : balance.normalSpeed;
+      (button.querySelector('.fourth-pace-value') as HTMLElement).textContent = `${speed.toFixed(1)} m/s`;
+    });
+    if (!fourth.pace) return;
+
+    const paceCopy = getFourthPaceCopy(fourth.pace);
+    const collisionCount = state.minorBumps + state.strongCollisions;
+    this.getElement('fourth-walk-pace').textContent = paceCopy.short;
+    this.getElement('fourth-walk-time').textContent = Math.max(0, fourth.duration - fourth.time).toFixed(1);
+    this.getElement('fourth-walk-speed').textContent = fourth.selectedSpeed.toFixed(1);
+    this.getElement('fourth-walk-hits').textContent = String(collisionCount);
+    (this.getElement('fourth-walk-progress-fill') as HTMLElement).style.width = `${Math.min(100, fourth.time / Math.max(0.01, fourth.duration) * 100)}%`;
+
+    const showImpact = state.mode === 'level-four-walk' && state.impactTime > 0;
+    const showImpactText = state.mode === 'level-four-walk' && state.impactTextTime > 0 && Boolean(state.impactLabel);
+    this.impactFlash.classList.toggle('is-hidden', !showImpact);
+    this.impactFlash.classList.toggle('is-strong', state.impactStrength > 0.6);
+    const fourthImpact = this.getElement('fourth-impact-text');
+    fourthImpact.classList.toggle('is-hidden', !showImpactText);
+    fourthImpact.classList.toggle('is-strong', state.impactStrength > 0.6);
+    fourthImpact.textContent = state.impactLabel;
+
+    this.getElement('fourth-reflection-pace').textContent = paceCopy.short;
+    this.getElement('fourth-reflection-stats').textContent = LANGUAGE === 'en'
+      ? `${fourth.duration.toFixed(1)}s · ${collisionCount} collisions`
+      : `${fourth.duration.toFixed(1)} 秒 · ${collisionCount} 次碰撞`;
+    this.getElement('fourth-reflection-text').textContent = paceCopy.reflection;
+    if (this.lastFourthReflectionPace !== fourth.pace) {
+      this.lastFourthReflectionPace = fourth.pace;
+      this.getElement('fourth-response-choices').replaceChildren(...FOURTH_RESPONSE_ORDER.map((response, index) => {
+        const copy = getFourthResponseCopy(fourth.pace as FourthPace, response);
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.dataset.fourthResponse = response;
+        button.className = `is-${response}`;
+        button.innerHTML = `<span>0${index + 1}</span><strong>${copy.label}</strong><p>${copy.text}</p><i>→</i>`;
+        return button;
+      }));
+    }
+
+    if (!fourth.endingId) return;
+    const ending = getFourthEndingCopy(fourth.endingId);
+    const endingPanel = this.getElement('fourth-ending-panel');
+    endingPanel.classList.toggle('is-self', ending.response === 'self');
+    endingPanel.classList.toggle('is-others', ending.response === 'others');
+    endingPanel.classList.toggle('is-accept', ending.response === 'accept');
+    this.getElement('fourth-ending-mark').textContent = ending.response === 'self' ? '↓' : ending.response === 'others' ? '×' : '○';
+    this.getElement('fourth-ending-title').textContent = ending.responseCopy.endingTitle;
+    this.getElement('fourth-ending-body').textContent = ending.responseCopy.endingBody;
+    this.getElement('fourth-ending-pace').textContent = ending.paceCopy.short;
+    this.getElement('fourth-ending-response').textContent = ending.responseCopy.label;
   }
 
   private dynamicGoal(level: 1 | 2 | 3, stats: ReturnType<typeof getChallengeStats>): string {

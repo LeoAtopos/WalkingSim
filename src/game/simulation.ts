@@ -11,14 +11,18 @@ import {
   type ChallengeUpgradeKey,
   type CollisionSide,
   type GameState,
+  type FourthEndingId,
+  type FourthPace,
+  type FourthResponse,
   type LevelId,
   type MetaProgress,
   type SpeedDefinition,
   type WalkerState,
 } from './types';
 import { CHALLENGE_UI, getChallengeStats, getLevel, hasAvailableUpgrade, isUpgradeMaxed } from './challenges';
+import { FOURTH_ENDING_IDS, makeFourthEndingId } from './fourth';
 import { COPY, LANGUAGE } from './i18n';
-import { getExperienceRequirement, getExperienceReward } from './balance';
+import { getExperienceRequirement, getExperienceReward, getFourthBalance } from './balance';
 
 const NPC_COLORS = [0xe96b5e, 0xf0ad4e, 0x59a884, 0x7658a5, 0xd97ea8, 0x426f9e, 0xc98e56];
 const META_STORAGE_KEY = 'walking-sim-roguelike-v1';
@@ -97,6 +101,8 @@ function freshMeta(): MetaProgress {
       2: { maxSpeed: 0, power: 0 },
       3: { mood: 0, guard: 0 },
     },
+    fourthEndings: Object.fromEntries(FOURTH_ENDING_IDS.map((id) => [id, false])) as Record<FourthEndingId, boolean>,
+    latestFourthEnding: null,
   };
 }
 
@@ -109,10 +115,30 @@ function loadMeta(): MetaProgress {
       fallback.completed[level] = Boolean(parsed.completed?.[level]);
       fallback.attempts[level] = 0;
     });
+    FOURTH_ENDING_IDS.forEach((id) => {
+      fallback.fourthEndings[id] = Boolean(parsed.fourthEndings?.[id]);
+    });
+    fallback.latestFourthEnding = parsed.latestFourthEnding && FOURTH_ENDING_IDS.includes(parsed.latestFourthEnding)
+      ? parsed.latestFourthEnding
+      : null;
   } catch {
     // A fresh run is still playable when storage is unavailable or malformed.
   }
   return fallback;
+}
+
+function freshFourth() {
+  const balance = getFourthBalance();
+  return {
+    pace: null,
+    response: null,
+    endingId: null,
+    time: 0,
+    duration: balance.duration,
+    selectedSpeed: 0,
+    lateralSpeed: balance.lateralSpeed,
+    lateralInput: 0 as const,
+  };
 }
 
 function freshChallenge(): ChallengeState {
@@ -168,6 +194,7 @@ export class WalkingSimulation {
       selectedLevel: null,
       meta: loadMeta(),
       challenge: freshChallenge(),
+      fourth: freshFourth(),
       speedLevel: 2,
       player: {
         id: 'player', x: 0, targetX: 0, z: 0, speed: SPEEDS[2].value,
@@ -198,6 +225,8 @@ export class WalkingSimulation {
     try {
       localStorage.setItem(META_STORAGE_KEY, JSON.stringify({
         completed: this.state.meta.completed,
+        fourthEndings: this.state.meta.fourthEndings,
+        latestFourthEnding: this.state.meta.latestFourthEnding,
       }));
     } catch {
       // Progress remains valid for the current session when storage is blocked.
@@ -206,6 +235,14 @@ export class WalkingSimulation {
 
   reset(): void {
     this.state = this.createState();
+  }
+
+  resetProgress(): void {
+    this.state = this.createState();
+    this.state.meta = freshMeta();
+    this.state.mode = 'level-select';
+    this.state.player.speed = 0;
+    this.saveMeta();
   }
 
   startWalking(): void {
@@ -222,7 +259,9 @@ export class WalkingSimulation {
     if (this.state.mode !== 'level-select') return;
     if (level === 4) {
       if (!this.isLevelFourUnlocked()) return;
-      this.startLegacyWalk();
+      this.state.selectedLevel = 4;
+      this.configureFourthLevel();
+      this.state.mode = 'level-four-choice';
       return;
     }
     this.state.selectedLevel = level;
@@ -251,12 +290,56 @@ export class WalkingSimulation {
     }
     this.state.mode = 'level-select';
     this.state.selectedLevel = null;
+    this.state.fourth = freshFourth();
     this.state.challenge.speedInput = 0;
     this.state.challenge.lateralInput = 0;
     this.state.player.speed = 0;
     this.state.impactTime = 0;
     this.state.impactTextTime = 0;
     this.saveMeta();
+  }
+
+  chooseFourthPace(pace: FourthPace): void {
+    if (this.state.mode !== 'level-four-choice') return;
+    const balance = getFourthBalance();
+    const selectedSpeed = pace === 'fast' ? balance.fastSpeed : pace === 'slow' ? balance.slowSpeed : balance.normalSpeed;
+    this.state.fourth = {
+      ...freshFourth(),
+      pace,
+      duration: balance.duration,
+      selectedSpeed,
+      lateralSpeed: balance.lateralSpeed,
+    };
+    this.state.player.speed = selectedSpeed;
+    this.state.distance = 0;
+    this.state.minorBumps = 0;
+    this.state.strongCollisions = 0;
+    this.state.impactTime = 0;
+    this.state.impactTextTime = 0;
+    this.state.impactLabel = '';
+    this.state.mode = 'level-four-walk';
+  }
+
+  setFourthLateralInput(value: -1 | 0 | 1): void {
+    if (this.state.mode !== 'level-four-walk') return;
+    this.state.fourth.lateralInput = value;
+  }
+
+  chooseFourthResponse(response: FourthResponse): void {
+    const pace = this.state.fourth.pace;
+    if (this.state.mode !== 'level-four-reflection' || !pace) return;
+    const endingId = makeFourthEndingId(pace, response);
+    this.state.fourth.response = response;
+    this.state.fourth.endingId = endingId;
+    this.state.meta.fourthEndings[endingId] = true;
+    this.state.meta.latestFourthEnding = endingId;
+    this.saveMeta();
+    this.state.mode = 'level-four-ending';
+  }
+
+  finishFourthEnding(): void {
+    if (this.state.mode !== 'level-four-ending') return;
+    this.returnToLevelSelect();
   }
 
   chooseUpgrade(key: ChallengeUpgradeKey): void {
@@ -356,6 +439,39 @@ export class WalkingSimulation {
     });
   }
 
+  private configureFourthLevel(): void {
+    const balance = getFourthBalance();
+    this.state.challenge = freshChallenge();
+    this.state.fourth = freshFourth();
+    this.state.player.x = 0;
+    this.state.player.targetX = 0;
+    this.state.player.z = 0;
+    this.state.player.speed = 0;
+    this.state.distance = 0;
+    this.state.elapsed = 0;
+    this.state.minorBumps = 0;
+    this.state.strongCollisions = 0;
+    this.state.impactTime = 0;
+    this.state.impactTextTime = 0;
+    this.state.impactLabel = '';
+    const aheadCount = Math.max(0, Math.min(this.state.npcs.length, Math.round(balance.crowdAheadCount)));
+    const npcMinSpeed = Math.min(balance.npcMinSpeed, balance.npcMaxSpeed);
+    const npcMaxSpeed = Math.max(balance.npcMinSpeed, balance.npcMaxSpeed);
+    this.state.npcs.forEach((npc, index) => {
+      npc.randomSeed = freshNpcRandomSeed();
+      const ahead = index < aheadCount;
+      const localIndex = ahead ? index : index - aheadCount;
+      npc.targetX = stratifiedStreetX(index + 4, npc.randomSeed + index * 9.41, CHALLENGE_CROWD_HALF_WIDTH);
+      npc.x = npc.targetX;
+      npc.z = ahead
+        ? -balance.crowdAheadStart - localIndex * balance.crowdAheadSpacing
+        : balance.crowdBehindStart + localIndex * balance.crowdBehindSpacing;
+      npc.speed = npcMinSpeed + (npcMaxSpeed - npcMinSpeed) * seededUnit(npc.randomSeed + 417.2);
+      npc.avoidanceTime = 0;
+      npc.recycles = 0;
+    });
+  }
+
   private startLegacyWalk(): void {
     this.state.selectedLevel = 4;
     this.state.mode = 'walking';
@@ -442,7 +558,7 @@ export class WalkingSimulation {
       this.registerChallengeCollision(relativeSpeed, npcId);
       return;
     }
-    if (this.state.mode !== 'walking') return;
+    if (this.state.mode !== 'walking' && this.state.mode !== 'level-four-walk') return;
     if (npcId) this.startNpcAvoidance(npcId, relativeSpeed);
     if (relativeSpeed >= STRONG_COLLISION_SPEED_GAP) {
       const phrases = side === 'ahead' ? COPY.collisions.ahead : COPY.collisions.behind;
@@ -516,7 +632,20 @@ export class WalkingSimulation {
     if (state.mode === 'challenge') this.updateChallenge(dt);
     if (state.mode === 'challenge-failure') this.updateChallengeFailure(dt);
     if (state.mode === 'challenge-victory') this.updateChallengeVictory(dt);
+    if (state.mode === 'level-four-walk') this.updateFourthWalk(dt);
     if (state.mode === 'walking') this.updateWalking(dt);
+  }
+
+  private updateFourthWalk(dt: number): void {
+    const fourth = this.state.fourth;
+    fourth.time = Math.min(fourth.duration, fourth.time + dt);
+    this.state.player.speed = fourth.selectedSpeed;
+    this.state.distance = Math.max(0, -this.state.player.z);
+    this.state.npcs.forEach((npc) => { npc.avoidanceTime = Math.max(0, npc.avoidanceTime - dt); });
+    if (fourth.time < fourth.duration) return;
+    fourth.lateralInput = 0;
+    this.state.player.speed = 0;
+    this.state.mode = 'level-four-reflection';
   }
 
   private updateChallenge(dt: number): void {

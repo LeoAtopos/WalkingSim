@@ -4,7 +4,7 @@ import { applyDocumentLanguage, COPY, LANGUAGE } from './game/i18n';
 import { CrowdPhysics } from './game/physics';
 import { GameRenderer } from './game/renderer';
 import { CHALLENGE_CROWD_HALF_WIDTH, WalkingSimulation } from './game/simulation';
-import { INTERACTION_TARGET, NPC_SPEED_MAX, NPC_SPEED_MIN, SPEEDS, SPEECH_CONTINUE_DELAY, type ChallengeUpgradeKey, type LevelId } from './game/types';
+import { INTERACTION_TARGET, NPC_SPEED_MAX, NPC_SPEED_MIN, SPEEDS, SPEECH_CONTINUE_DELAY, type ChallengeUpgradeKey, type FourthPace, type FourthResponse, type LevelId } from './game/types';
 import { GameUI } from './game/ui';
 
 applyDocumentLanguage();
@@ -38,6 +38,11 @@ class WalkingSimApp {
       onRetryChallenge: () => this.retryChallenge(),
       onReturnToLevels: () => this.returnToLevels(),
       onFinishVictory: () => this.finishVictory(),
+      onChooseFourthPace: (pace) => this.chooseFourthPace(pace),
+      onFourthLateralInput: (value) => this.simulation.setFourthLateralInput(value),
+      onChooseFourthResponse: (response) => this.chooseFourthResponse(response),
+      onFinishFourthEnding: () => this.finishFourthEnding(),
+      onResetProgress: () => this.resetProgress(),
       onChallengeInput: (axis, value) => this.simulation.setChallengeInput(axis, value),
       onSpeedChange: (delta) => this.changeSpeed(delta),
       onDismissSpeech: () => this.dismissSpeech(),
@@ -129,6 +134,36 @@ class WalkingSimApp {
     this.simulation.finishVictory();
   }
 
+  private chooseFourthPace(pace: FourthPace): void {
+    const before = this.simulation.state.mode;
+    this.simulation.chooseFourthPace(pace);
+    if (this.simulation.state.mode === before) return;
+    this.pressedKeys.clear();
+    this.physics.reset(this.simulation.state);
+    this.audio.playStart();
+  }
+
+  private chooseFourthResponse(response: FourthResponse): void {
+    const before = this.simulation.state.mode;
+    this.simulation.chooseFourthResponse(response);
+    if (this.simulation.state.mode !== before) this.audio.playContinue();
+  }
+
+  private finishFourthEnding(): void {
+    const before = this.simulation.state.mode;
+    this.simulation.finishFourthEnding();
+    if (this.simulation.state.mode !== before) this.audio.playContinue();
+  }
+
+  private resetProgress(): void {
+    this.pressedKeys.clear();
+    this.simulation.resetProgress();
+    this.physics.reset(this.simulation.state);
+    this.audio.playRestart();
+    this.audio.resetTracking(this.simulation.state);
+    this.updateUi();
+  }
+
   private changeSpeed(delta: number): void {
     const before = this.simulation.state.speedLevel;
     this.simulation.changeSpeed(delta);
@@ -204,7 +239,7 @@ class WalkingSimApp {
 
   private bindInput(): void {
     window.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape' && (this.simulation.state.mode === 'walking' || this.simulation.state.mode === 'challenge')) {
+      if (event.key === 'Escape' && (this.simulation.state.mode === 'walking' || this.simulation.state.mode === 'challenge' || this.simulation.state.mode === 'level-four-walk')) {
         event.preventDefault();
         if (!event.repeat) this.ui.toggleExitConfirmation();
         return;
@@ -234,7 +269,16 @@ class WalkingSimApp {
         } else if (['a', 'd', 'arrowleft', 'arrowright'].includes(key)) {
           event.preventDefault();
           this.pressedKeys.add(key);
-          this.syncChallengeLateralInput();
+          this.syncLateralInput();
+        }
+        return;
+      }
+      if (this.simulation.state.mode === 'level-four-walk') {
+        const key = event.key.toLowerCase();
+        if (['a', 'd', 'arrowleft', 'arrowright'].includes(key)) {
+          event.preventDefault();
+          this.pressedKeys.add(key);
+          this.syncLateralInput();
         }
         return;
       }
@@ -251,11 +295,11 @@ class WalkingSimApp {
     window.addEventListener('keyup', (event) => {
       const key = event.key.toLowerCase();
       if (!this.pressedKeys.delete(key)) return;
-      this.syncChallengeLateralInput();
+      this.syncLateralInput();
     });
     window.addEventListener('blur', () => {
       this.pressedKeys.clear();
-      this.syncChallengeLateralInput();
+      this.syncLateralInput();
     });
 
     document.addEventListener('fullscreenchange', () => this.renderer.resize());
@@ -264,10 +308,12 @@ class WalkingSimApp {
     });
   }
 
-  private syncChallengeLateralInput(): void {
+  private syncLateralInput(): void {
     const positiveLateral = this.pressedKeys.has('d') || this.pressedKeys.has('arrowright');
     const negativeLateral = this.pressedKeys.has('a') || this.pressedKeys.has('arrowleft');
-    this.simulation.setChallengeInput('lateral', positiveLateral === negativeLateral ? 0 : positiveLateral ? 1 : -1);
+    const value = positiveLateral === negativeLateral ? 0 : positiveLateral ? 1 : -1;
+    if (this.simulation.state.mode === 'level-four-walk') this.simulation.setFourthLateralInput(value);
+    else this.simulation.setChallengeInput('lateral', value);
   }
 
   private async toggleFullscreen(): Promise<void> {
@@ -342,6 +388,20 @@ class WalkingSimApp {
           failureKind: state.challenge.failureKind,
           lastUpgrade: state.challenge.lastUpgrade,
         } : null,
+        fourth: state.selectedLevel === 4 || state.mode.startsWith('level-four-') ? {
+          pace: state.fourth.pace,
+          response: state.fourth.response,
+          endingId: state.fourth.endingId,
+          timeSeconds: Number(state.fourth.time.toFixed(2)),
+          timeRemaining: Number(Math.max(0, state.fourth.duration - state.fourth.time).toFixed(2)),
+          duration: state.fourth.duration,
+          selectedSpeed: state.fourth.selectedSpeed,
+          lateralSpeed: state.fourth.lateralSpeed,
+          lateralInput: state.fourth.lateralInput,
+          collisions: state.minorBumps + state.strongCollisions,
+          unlockedEndings: Object.values(state.meta.fourthEndings).filter(Boolean).length,
+          latestEnding: state.meta.latestFourthEnding,
+        } : null,
         exitConfirmationOpen: this.ui.isExitConfirmationOpen(),
         availableActions: this.availableActions(),
         player: {
@@ -349,7 +409,7 @@ class WalkingSimApp {
           z: Number(state.player.z.toFixed(2)),
           speedLevel: state.speedLevel,
           speedName: activeSpeed.label,
-          speedMetersPerSecond: activeSpeed.value,
+          speedMetersPerSecond: state.mode === 'level-four-walk' ? state.fourth.selectedSpeed : activeSpeed.value,
           distance: Number(state.distance.toFixed(1)),
         },
         tasks: SPEEDS.map((speed) => ({
@@ -444,7 +504,7 @@ class WalkingSimApp {
     const state = this.simulation.state;
     if (this.ui.isExitConfirmationOpen()) return [COPY.debug.exitCancel, COPY.debug.exitConfirm];
     if (state.mode === 'intro') return [COPY.debug.start, COPY.debug.share];
-    if (state.mode === 'level-select') return ['click #level-card-1..4: select an unlocked level', 'click #balance-editor-open: edit level values'];
+    if (state.mode === 'level-select') return ['click #level-card-1..4: select an unlocked level', 'click #balance-editor-open: edit level values', 'click #progress-reset-open: clear progress while keeping edited balance'];
     if (state.mode === 'level-briefing') return ['click #begin-challenge: start run', 'click #briefing-back: level select'];
     if (state.mode === 'challenge') return ['press W/S once or click #challenge-accelerate/#challenge-brake: latch acceleration or braking', 'hold A/D or touch lateral buttons: move laterally', 'Escape: leave run'];
     if (state.mode === 'challenge-failure') return ['wait for the failure sequence to finish'];
@@ -453,6 +513,10 @@ class WalkingSimApp {
       ? ['click one #upgrade-* choice', 'click #upgrade-back: level select']
       : ['click #retry-without-upgrade: retry without upgrading', 'click #upgrade-back: level select'];
     if (state.mode === 'victory') return ['click #victory-back: level select'];
+    if (state.mode === 'level-four-choice') return ['click [data-fourth-pace]: choose fast, slow, or average pace', 'click #fourth-choice-back: level select'];
+    if (state.mode === 'level-four-walk') return ['hold A/D or touch lateral buttons: move laterally', 'wait for the 10-second walk to finish', 'Escape: leave run'];
+    if (state.mode === 'level-four-reflection') return ['click [data-fourth-response]: choose how to interpret the walk'];
+    if (state.mode === 'level-four-ending') return ['click #fourth-ending-finish: reveal the latest ending in the map'];
     if (state.mode === 'walking') {
       if (state.pendingEvaluation) return [0, 1, 2].map((index) => COPY.debug.chooseEvaluation(index));
       if (state.speech) return state.speech.elapsed >= SPEECH_CONTINUE_DELAY

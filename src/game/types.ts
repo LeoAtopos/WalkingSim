@@ -9,6 +9,10 @@ export type GameMode =
   | 'challenge-victory'
   | 'upgrade'
   | 'victory'
+  | 'level-four-choice'
+  | 'level-four-walk'
+  | 'level-four-reflection'
+  | 'level-four-ending'
   | 'walking'
   | 'return'
   | 'interaction'
@@ -19,6 +23,9 @@ export type ChallengeLevelId = 1 | 2 | 3;
 export type LevelId = ChallengeLevelId | 4;
 export type ChallengeUpgradeKey = 'response' | 'lateral' | 'maxSpeed' | 'power' | 'mood' | 'guard';
 export type ChallengeFailureKind = 'collision' | 'timeout' | 'arrived-early' | 'cried' | null;
+export type FourthPace = 'fast' | 'slow' | 'normal';
+export type FourthResponse = 'self' | 'others' | 'accept';
+export type FourthEndingId = `${FourthPace}-${FourthResponse}`;
 
 export interface SpeedDefinition {
   id: 'stopped' | 'slow' | 'normal' | 'brisk' | 'run';
@@ -63,6 +70,19 @@ export interface MetaProgress {
     2: { maxSpeed: number; power: number };
     3: { mood: number; guard: number };
   };
+  fourthEndings: Record<FourthEndingId, boolean>;
+  latestFourthEnding: FourthEndingId | null;
+}
+
+export interface FourthLevelState {
+  pace: FourthPace | null;
+  response: FourthResponse | null;
+  endingId: FourthEndingId | null;
+  time: number;
+  duration: number;
+  selectedSpeed: number;
+  lateralSpeed: number;
+  lateralInput: -1 | 0 | 1;
 }
 
 export interface ChallengeState {
@@ -108,6 +128,7 @@ export interface GameState {
   selectedLevel: LevelId | null;
   meta: MetaProgress;
   challenge: ChallengeState;
+  fourth: FourthLevelState;
   speedLevel: number;
   player: WalkerState;
   npcs: WalkerState[];

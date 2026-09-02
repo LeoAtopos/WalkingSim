@@ -28,13 +28,28 @@ export interface LevelBalance {
   crowdBehindSpacing: number;
 }
 
-export type BalanceConfig = Record<ChallengeLevelId, LevelBalance>;
+export interface FourthLevelBalance {
+  duration: number;
+  fastSpeed: number;
+  slowSpeed: number;
+  normalSpeed: number;
+  lateralSpeed: number;
+  npcMinSpeed: number;
+  npcMaxSpeed: number;
+  crowdAheadCount: number;
+  crowdAheadStart: number;
+  crowdAheadSpacing: number;
+  crowdBehindStart: number;
+  crowdBehindSpacing: number;
+}
+
+export type BalanceConfig = Record<ChallengeLevelId, LevelBalance> & { 4: FourthLevelBalance };
 
 const BALANCE_STORAGE_KEY = 'walking-sim-level-balance-v1';
 
 export const DEFAULT_BALANCE: BalanceConfig = {
   1: {
-    timeLimit: 40, failureDuration: 1.8, victoryDuration: 2.2, xpRewardMax: 50, xpBaseRequirement: 18, xpLinearGrowth: 12, xpQuadraticGrowth: 1,
+    timeLimit: 40, failureDuration: 1.8, victoryDuration: 2.2, xpRewardMax: 80, xpBaseRequirement: 18, xpLinearGrowth: 12, xpQuadraticGrowth: 1,
     finishDistance: 0, maxSpeed: 22, response: 4.2, targetAdjustRate: 6.5, lateral: 0.6,
     hitDamage: 0, maxMood: 0, responseUpgrade: 0.4, lateralUpgrade: 0.45,
     maxSpeedUpgrade: 0, powerReduction: 0, moodUpgrade: 0, guardReduction: 0,
@@ -54,6 +69,20 @@ export const DEFAULT_BALANCE: BalanceConfig = {
     maxSpeedUpgrade: 0, powerReduction: 0, moodUpgrade: 14, guardReduction: 4,
     crowdAheadCount: 62, crowdAheadStart: 2, crowdAheadSpacing: 2, crowdBehindStart: 2, crowdBehindSpacing: 2,
   },
+  4: {
+    duration: 10,
+    fastSpeed: 50.4,
+    slowSpeed: 3.4,
+    normalSpeed: 16.2,
+    lateralSpeed: 2.4,
+    npcMinSpeed: 13.04,
+    npcMaxSpeed: 34.16,
+    crowdAheadCount: 60,
+    crowdAheadStart: 4.5,
+    crowdAheadSpacing: 1.55,
+    crowdBehindStart: 6.5,
+    crowdBehindSpacing: 2.1,
+  },
 };
 
 const cloneDefaults = (): BalanceConfig => structuredClone(DEFAULT_BALANCE);
@@ -69,6 +98,13 @@ function sanitize(source: unknown): BalanceConfig {
       if (Number.isFinite(value)) result[level][key] = Math.max(0, Math.min(9999, value));
     });
   });
+  const fourthCandidate = (source as Partial<BalanceConfig>)[4];
+  if (fourthCandidate && typeof fourthCandidate === 'object') {
+    (Object.keys(result[4]) as (keyof FourthLevelBalance)[]).forEach((key) => {
+      const value = Number(fourthCandidate[key]);
+      if (Number.isFinite(value)) result[4][key] = Math.max(0, Math.min(9999, value));
+    });
+  }
   return result;
 }
 
@@ -88,6 +124,10 @@ export function getBalanceConfig(): BalanceConfig {
 
 export function getLevelBalance(level: ChallengeLevelId): LevelBalance {
   return currentBalance[level];
+}
+
+export function getFourthBalance(): FourthLevelBalance {
+  return { ...currentBalance[4] };
 }
 
 export function getExperienceRequirement(level: ChallengeLevelId, growthLevel: number): number {
