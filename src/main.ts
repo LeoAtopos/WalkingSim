@@ -25,6 +25,7 @@ class WalkingSimApp {
   private lastFrame = performance.now();
   private running = true;
   private readonly pressedKeys = new Set<string>();
+  private activeLateralPointerId: number | null = null;
 
   private constructor(container: HTMLElement, simulation: WalkingSimulation, renderer: GameRenderer, physics: CrowdPhysics) {
     this.simulation = simulation;
@@ -40,6 +41,7 @@ class WalkingSimApp {
       onFinishVictory: () => this.finishVictory(),
       onChooseFourthPace: (pace) => this.chooseFourthPace(pace),
       onFourthLateralInput: (value) => this.simulation.setFourthLateralInput(value),
+      onContinueFourthSummary: () => this.continueFourthSummary(),
       onChooseFourthResponse: (response) => this.chooseFourthResponse(response),
       onFinishFourthEnding: () => this.finishFourthEnding(),
       onResetProgress: () => this.resetProgress(),
@@ -146,6 +148,12 @@ class WalkingSimApp {
   private chooseFourthResponse(response: FourthResponse): void {
     const before = this.simulation.state.mode;
     this.simulation.chooseFourthResponse(response);
+    if (this.simulation.state.mode !== before) this.audio.playContinue();
+  }
+
+  private continueFourthSummary(): void {
+    const before = this.simulation.state.mode;
+    this.simulation.continueFourthSummary();
     if (this.simulation.state.mode !== before) this.audio.playContinue();
   }
 
@@ -297,7 +305,24 @@ class WalkingSimApp {
       if (!this.pressedKeys.delete(key)) return;
       this.syncLateralInput();
     });
+    window.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0 || !this.isLateralPointerMode()) return;
+      if ((event.target as HTMLElement).closest('button, a, input, select, textarea, [role="dialog"]')) return;
+      this.activeLateralPointerId = event.pointerId;
+      this.setPointerLateral(event.clientX);
+    });
+    window.addEventListener('pointermove', (event) => {
+      if (event.pointerId === this.activeLateralPointerId) this.setPointerLateral(event.clientX);
+    });
+    const releaseLateralPointer = (event: PointerEvent) => {
+      if (event.pointerId !== this.activeLateralPointerId) return;
+      this.activeLateralPointerId = null;
+      this.setActiveLateralInput(0);
+    };
+    window.addEventListener('pointerup', releaseLateralPointer);
+    window.addEventListener('pointercancel', releaseLateralPointer);
     window.addEventListener('blur', () => {
+      this.activeLateralPointerId = null;
       this.pressedKeys.clear();
       this.syncLateralInput();
     });
@@ -312,6 +337,19 @@ class WalkingSimApp {
     const positiveLateral = this.pressedKeys.has('d') || this.pressedKeys.has('arrowright');
     const negativeLateral = this.pressedKeys.has('a') || this.pressedKeys.has('arrowleft');
     const value = positiveLateral === negativeLateral ? 0 : positiveLateral ? 1 : -1;
+    if (this.simulation.state.mode === 'level-four-walk') this.simulation.setFourthLateralInput(value);
+    else this.simulation.setChallengeInput('lateral', value);
+  }
+
+  private isLateralPointerMode(): boolean {
+    return this.simulation.state.mode === 'challenge' || this.simulation.state.mode === 'level-four-walk';
+  }
+
+  private setPointerLateral(clientX: number): void {
+    this.setActiveLateralInput(clientX < window.innerWidth / 2 ? -1 : 1);
+  }
+
+  private setActiveLateralInput(value: -1 | 0 | 1): void {
     if (this.simulation.state.mode === 'level-four-walk') this.simulation.setFourthLateralInput(value);
     else this.simulation.setChallengeInput('lateral', value);
   }
@@ -395,6 +433,8 @@ class WalkingSimApp {
           timeSeconds: Number(state.fourth.time.toFixed(2)),
           timeRemaining: Number(Math.max(0, state.fourth.duration - state.fourth.time).toFixed(2)),
           duration: state.fourth.duration,
+          summaryElapsed: Number(state.fourth.summaryElapsed.toFixed(2)),
+          summaryDuration: state.fourth.summaryDuration,
           selectedSpeed: state.fourth.selectedSpeed,
           lateralSpeed: state.fourth.lateralSpeed,
           lateralInput: state.fourth.lateralInput,
@@ -515,6 +555,9 @@ class WalkingSimApp {
     if (state.mode === 'victory') return ['click #victory-back: level select'];
     if (state.mode === 'level-four-choice') return ['click [data-fourth-pace]: choose fast, slow, or average pace', 'click #fourth-choice-back: level select'];
     if (state.mode === 'level-four-walk') return ['hold A/D or touch lateral buttons: move laterally', 'wait for the 10-second walk to finish', 'Escape: leave run'];
+    if (state.mode === 'level-four-summary') return state.fourth.summaryElapsed >= state.fourth.summaryDuration
+      ? ['click #fourth-summary-continue: continue to the reflection choices']
+      : ['wait for the continue button to appear'];
     if (state.mode === 'level-four-reflection') return ['click [data-fourth-response]: choose how to interpret the walk'];
     if (state.mode === 'level-four-ending') return ['click #fourth-ending-finish: reveal the latest ending in the map'];
     if (state.mode === 'walking') {

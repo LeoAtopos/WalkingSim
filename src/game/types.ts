@@ -11,6 +11,7 @@ export type GameMode =
   | 'victory'
   | 'level-four-choice'
   | 'level-four-walk'
+  | 'level-four-summary'
   | 'level-four-reflection'
   | 'level-four-ending'
   | 'walking'
@@ -83,6 +84,8 @@ export interface FourthLevelState {
   selectedSpeed: number;
   lateralSpeed: number;
   lateralInput: -1 | 0 | 1;
+  summaryElapsed: number;
+  summaryDuration: number;
 }
 
 export interface ChallengeState {

@@ -4,6 +4,8 @@ import type { ChallengeLevelId, ChallengeUpgradeKey, LevelId, MetaProgress } fro
 
 type Localized = { zh: string; en: string };
 
+export const MIN_COLLISION_SPEED_LOSS = 0.5;
+
 export interface LevelDefinition {
   id: LevelId;
   title: Localized;
@@ -83,7 +85,7 @@ const UPGRADE_COPY: Record<ChallengeUpgradeKey, { name: Localized; effect: Local
 export const CHALLENGE_UI = LANGUAGE === 'zh-CN' ? {
   selectKicker: 'SELECT YOUR WALK', selectTitle: '走路，也有不同走法', selectBody: '',
   locked: '尚未解锁', unlocked: '可以挑战', cleared: '已通关', attempt: '尝试', times: '次', clearCount: '前三关进度',
-  briefingKicker: 'BEFORE YOU WALK', start: '开始这一轮', back: '返回选关', controls: 'W/S 切换持续加速或减速 · A/D 左右移动',
+  briefingKicker: 'BEFORE YOU WALK', start: '开始这一轮', back: '返回选关', controls: 'W/S 切换持续加速或减速 · A/D 或按住画面左右侧横移',
   run: '本轮', target: '目标', currentSpeed: '当前速度', targetSpeed: '目标速度', response: '变速响应', lateral: '横移速度',
   speedLatch: '按一下切换持续加速 / 减速',
   distance: '路程', mood: '心情', hits: '碰撞', seconds: '秒', meters: '米',
@@ -97,7 +99,7 @@ export const CHALLENGE_UI = LANGUAGE === 'zh-CN' ? {
 } : {
   selectKicker: 'SELECT YOUR PROBLEM', selectTitle: 'How would you like to die today?', selectBody: 'Failures strengthen this level. Leaving it resets those upgrades.',
   locked: 'LOCKED', unlocked: 'READY', cleared: 'CLEARED', attempt: 'ATTEMPT', times: '', clearCount: 'FIRST THREE',
-  briefingKicker: 'BEFORE YOU WALK', start: 'START THIS RUN', back: 'BACK TO LEVELS', controls: 'W/S latches acceleration or braking · A/D sidesteps',
+  briefingKicker: 'BEFORE YOU WALK', start: 'START THIS RUN', back: 'BACK TO LEVELS', controls: 'W/S latches acceleration or braking · A/D or hold either screen half to sidestep',
   run: 'RUN', target: 'GOAL', currentSpeed: 'CURRENT', targetSpeed: 'TARGET', response: 'PACE RESPONSE', lateral: 'SIDESTEP',
   speedLatch: 'Press once to latch acceleration / braking',
   distance: 'DISTANCE', mood: 'MOOD', hits: 'HITS', seconds: 'SEC', meters: 'M',
@@ -144,7 +146,7 @@ export function getUpgradeStatValue(meta: MetaProgress, level: ChallengeLevelId,
   if (key === 'response') return balance.response + upgradeLevel * balance.responseUpgrade;
   if (key === 'lateral') return balance.lateral + upgradeLevel * balance.lateralUpgrade;
   if (key === 'maxSpeed') return balance.maxSpeed + upgradeLevel * balance.maxSpeedUpgrade;
-  if (key === 'power') return Math.max(1, balance.hitDamage - upgradeLevel * balance.powerReduction);
+  if (key === 'power') return Math.max(MIN_COLLISION_SPEED_LOSS, balance.hitDamage - upgradeLevel * balance.powerReduction);
   if (key === 'mood') return balance.maxMood + upgradeLevel * balance.moodUpgrade;
   return Math.max(0, balance.hitDamage - upgradeLevel * balance.guardReduction);
 }
@@ -152,7 +154,7 @@ export function getUpgradeStatValue(meta: MetaProgress, level: ChallengeLevelId,
 export function isUpgradeMaxed(meta: MetaProgress, level: ChallengeLevelId, key: ChallengeUpgradeKey): boolean {
   if (key !== 'power') return false;
   const balance = getLevelBalance(level);
-  return balance.powerReduction <= 0 || getUpgradeStatValue(meta, level, key) <= 1;
+  return balance.powerReduction <= 0 || getUpgradeStatValue(meta, level, key) <= MIN_COLLISION_SPEED_LOSS;
 }
 
 export function hasAvailableUpgrade(meta: MetaProgress, level: ChallengeLevelId): boolean {
@@ -165,7 +167,7 @@ export function getChallengeStats(meta: MetaProgress, level: ChallengeLevelId) {
     return { ...balance, minSpeed: 0, response: balance.response + meta.upgrades[1].response * balance.responseUpgrade, lateral: balance.lateral + meta.upgrades[1].lateral * balance.lateralUpgrade };
   }
   if (level === 2) {
-    return { ...balance, minSpeed: 0, maxSpeed: balance.maxSpeed + meta.upgrades[2].maxSpeed * balance.maxSpeedUpgrade, hitDamage: Math.max(1, balance.hitDamage - meta.upgrades[2].power * balance.powerReduction) };
+    return { ...balance, minSpeed: 0, maxSpeed: balance.maxSpeed + meta.upgrades[2].maxSpeed * balance.maxSpeedUpgrade, hitDamage: Math.max(MIN_COLLISION_SPEED_LOSS, balance.hitDamage - meta.upgrades[2].power * balance.powerReduction) };
   }
   return { ...balance, minSpeed: 0, maxMood: balance.maxMood + meta.upgrades[3].mood * balance.moodUpgrade, hitDamage: Math.max(0, balance.hitDamage - meta.upgrades[3].guard * balance.guardReduction) };
 }

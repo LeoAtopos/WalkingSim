@@ -138,6 +138,8 @@ function freshFourth() {
     selectedSpeed: 0,
     lateralSpeed: balance.lateralSpeed,
     lateralInput: 0 as const,
+    summaryElapsed: 0,
+    summaryDuration: balance.summaryDuration,
   };
 }
 
@@ -323,6 +325,11 @@ export class WalkingSimulation {
   setFourthLateralInput(value: -1 | 0 | 1): void {
     if (this.state.mode !== 'level-four-walk') return;
     this.state.fourth.lateralInput = value;
+  }
+
+  continueFourthSummary(): void {
+    if (this.state.mode !== 'level-four-summary' || this.state.fourth.summaryElapsed < this.state.fourth.summaryDuration) return;
+    this.state.mode = 'level-four-reflection';
   }
 
   chooseFourthResponse(response: FourthResponse): void {
@@ -633,6 +640,7 @@ export class WalkingSimulation {
     if (state.mode === 'challenge-failure') this.updateChallengeFailure(dt);
     if (state.mode === 'challenge-victory') this.updateChallengeVictory(dt);
     if (state.mode === 'level-four-walk') this.updateFourthWalk(dt);
+    if (state.mode === 'level-four-summary') this.updateFourthSummary(dt);
     if (state.mode === 'walking') this.updateWalking(dt);
   }
 
@@ -644,8 +652,14 @@ export class WalkingSimulation {
     this.state.npcs.forEach((npc) => { npc.avoidanceTime = Math.max(0, npc.avoidanceTime - dt); });
     if (fourth.time < fourth.duration) return;
     fourth.lateralInput = 0;
+    fourth.summaryElapsed = 0;
     this.state.player.speed = 0;
-    this.state.mode = 'level-four-reflection';
+    this.state.mode = 'level-four-summary';
+  }
+
+  private updateFourthSummary(dt: number): void {
+    const fourth = this.state.fourth;
+    fourth.summaryElapsed = Math.min(fourth.summaryDuration, fourth.summaryElapsed + dt);
   }
 
   private updateChallenge(dt: number): void {

@@ -30,6 +30,7 @@ export interface LevelBalance {
 
 export interface FourthLevelBalance {
   duration: number;
+  summaryDuration: number;
   fastSpeed: number;
   slowSpeed: number;
   normalSpeed: number;
@@ -71,6 +72,7 @@ export const DEFAULT_BALANCE: BalanceConfig = {
   },
   4: {
     duration: 10,
+    summaryDuration: 2.2,
     fastSpeed: 50.4,
     slowSpeed: 3.4,
     normalSpeed: 16.2,

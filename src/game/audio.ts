@@ -109,7 +109,7 @@ export class GameAudio {
       this.applySceneMix();
       this.footstepClock = 0;
       if (previousScene === 'challenge' && state.mode === 'challenge-victory') this.playFinish();
-      if (previousScene === 'level-four-walk' && state.mode === 'level-four-reflection') this.playFinish();
+      if (previousScene === 'level-four-walk' && state.mode === 'level-four-summary') this.playFinish();
     }
 
     const completedTasks = SPEEDS.filter((speed) => state.tasks[speed.id].complete).length;
@@ -416,6 +416,7 @@ export class GameAudio {
       victory: { music: 0.46, ambience: 0.1 },
       'level-four-choice': { music: 0.34, ambience: 0.12 },
       'level-four-walk': { music: 0.4, ambience: 0.2 },
+      'level-four-summary': { music: 0.12, ambience: 0.06 },
       'level-four-reflection': { music: 0.16, ambience: 0.08 },
       'level-four-ending': { music: 0.45, ambience: 0.1 },
       walking: { music: 0.38, ambience: 0.18 },

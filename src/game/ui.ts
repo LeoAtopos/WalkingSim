@@ -14,6 +14,7 @@ interface UIActions {
   onFinishVictory: () => void;
   onChooseFourthPace: (pace: FourthPace) => void;
   onFourthLateralInput: (value: -1 | 0 | 1) => void;
+  onContinueFourthSummary: () => void;
   onChooseFourthResponse: (response: FourthResponse) => void;
   onFinishFourthEnding: () => void;
   onResetProgress: () => void;
@@ -76,6 +77,7 @@ const BALANCE_FIELDS: Record<BalanceEditorLevel, readonly BalanceField[]> = {
   ],
   4: [
     { key: 'duration', label: '行走持续时间', unit: '秒', step: 0.5 },
+    { key: 'summaryDuration', label: '结束提示时长', unit: '秒', step: 0.1 },
     { key: 'fastSpeed', label: '快速选项速度', unit: 'm/s', step: 0.1 },
     { key: 'normalSpeed', label: '平速选项速度', unit: 'm/s', step: 0.1 },
     { key: 'slowSpeed', label: '慢速选项速度', unit: 'm/s', step: 0.1 },
@@ -117,6 +119,7 @@ export class GameUI {
   private readonly victoryScreen: HTMLElement;
   private readonly fourthChoiceScreen: HTMLElement;
   private readonly fourthWalkHud: HTMLElement;
+  private readonly fourthSummaryScreen: HTMLElement;
   private readonly fourthReflectionScreen: HTMLElement;
   private readonly fourthEndingScreen: HTMLElement;
   private readonly levelGrid: HTMLElement;
@@ -270,7 +273,7 @@ export class GameUI {
           <div class="challenge-gear-track" aria-live="polite"><i></i><b id="challenge-gear-state">${LANGUAGE === 'en' ? 'NEUTRAL' : '空档'}</b></div>
           <button id="challenge-brake" type="button" data-challenge-axis="speed" data-challenge-value="-1" aria-label="${CHALLENGE_UI.slower}"><b>−</b><span>${CHALLENGE_UI.slower}</span></button>
         </div>
-        <div class="challenge-control-hint"><kbd>W</kbd><kbd>S</kbd> ${CHALLENGE_UI.speedLatch} · <kbd>A</kbd><kbd>D</kbd> ${CHALLENGE_UI.lateral}</div>
+        <div class="challenge-control-hint"><kbd>W</kbd><kbd>S</kbd> ${CHALLENGE_UI.speedLatch} · <kbd>A</kbd><kbd>D</kbd> / ${LANGUAGE === 'en' ? 'hold either screen half to sidestep' : '按住画面左右侧横移'}</div>
         <div id="challenge-touch-controls" class="challenge-touch-controls">
           <button type="button" data-challenge-axis="lateral" data-challenge-value="-1">←<span>${CHALLENGE_UI.left}</span></button>
           <button type="button" data-challenge-axis="lateral" data-challenge-value="1">→<span>${CHALLENGE_UI.right}</span></button>
@@ -347,14 +350,22 @@ export class GameUI {
         <div class="fourth-walk-progress"><i id="fourth-walk-progress-fill"></i></div>
         <div class="fourth-walk-stats">
           <div><span>速度</span><strong><b id="fourth-walk-speed">0.0</b> m/s</strong></div>
-          <div><span>碰撞</span><strong><b id="fourth-walk-hits">0</b> 次</strong></div>
+          <div><span>累计碰撞</span><strong><b id="fourth-walk-hits">0</b> 次</strong></div>
         </div>
-        <div class="fourth-control-hint"><kbd>A</kbd><kbd>D</kbd> 左右移动</div>
+        <div class="fourth-control-hint"><kbd>A</kbd><kbd>D</kbd> / ${LANGUAGE === 'en' ? 'hold either screen half to sidestep' : '按住画面左右侧横移'}</div>
         <div id="fourth-touch-controls" class="fourth-touch-controls">
           <button type="button" data-fourth-lateral="-1">←<span>左移</span></button>
           <button type="button" data-fourth-lateral="1">→<span>右移</span></button>
         </div>
         <div id="fourth-impact-text" class="impact-text is-hidden" aria-live="polite"></div>
+      </section>
+
+      <section id="fourth-summary-screen" class="scene-ui fourth-summary-ui is-hidden" aria-label="第四关行走总结">
+        <div class="fourth-summary-card" aria-live="assertive">
+          <span>THE WALK ENDS</span>
+          <strong id="fourth-summary-text"></strong>
+          <button id="fourth-summary-continue" class="game-button primary-button is-hidden" type="button">点击继续 <span>→</span></button>
+        </div>
       </section>
 
       <section id="fourth-reflection-screen" class="scene-ui fourth-overlay fourth-reflection-ui is-hidden" aria-label="选择你如何理解这段路">
@@ -370,6 +381,7 @@ export class GameUI {
 
       <section id="fourth-ending-screen" class="scene-ui fourth-overlay fourth-ending-ui is-hidden" aria-label="第四关结局">
         <div id="fourth-ending-panel" class="fourth-panel fourth-ending-panel">
+          <h1>游戏结局</h1>
           <span class="eyebrow">ENDING UNLOCKED</span>
           <div id="fourth-ending-mark" class="fourth-ending-mark" aria-hidden="true"></div>
           <h2 id="fourth-ending-title"></h2>
@@ -505,6 +517,7 @@ export class GameUI {
     this.victoryScreen = this.getElement('victory-screen');
     this.fourthChoiceScreen = this.getElement('fourth-choice-screen');
     this.fourthWalkHud = this.getElement('fourth-walk-hud');
+    this.fourthSummaryScreen = this.getElement('fourth-summary-screen');
     this.fourthReflectionScreen = this.getElement('fourth-reflection-screen');
     this.fourthEndingScreen = this.getElement('fourth-ending-screen');
     this.levelGrid = this.getElement('level-grid');
@@ -579,6 +592,7 @@ export class GameUI {
         <em>${localized(level.subtitle)}</em>
         <p>${localized(level.rule)}</p>
         <div class="level-card-meta"><span class="level-objective"></span><b>→</b></div>
+        ${level.id === 4 ? `<div class="level-locked-only">${LANGUAGE === 'en' ? 'CLEAR THE FIRST THREE LEVELS TO UNLOCK' : '需要通过三关后解锁'}</div>` : ''}
       `;
       this.levelGrid.append(card);
     });
@@ -680,6 +694,7 @@ export class GameUI {
       if (button?.dataset.fourthResponse) this.actions.onChooseFourthResponse(button.dataset.fourthResponse as FourthResponse);
     });
     this.getElement('fourth-choice-back').addEventListener('click', this.actions.onReturnToLevels);
+    this.getElement('fourth-summary-continue').addEventListener('click', this.actions.onContinueFourthSummary);
     this.getElement('fourth-reflection-back').addEventListener('click', this.actions.onReturnToLevels);
     this.getElement('fourth-ending-finish').addEventListener('click', this.actions.onFinishFourthEnding);
     this.root.querySelectorAll<HTMLButtonElement>('[data-fourth-lateral]').forEach((button) => {
@@ -883,7 +898,7 @@ export class GameUI {
     if (['level-select', 'level-briefing', 'challenge', 'challenge-failure', 'challenge-victory', 'upgrade', 'victory'].includes(state.mode)) {
       this.updateChallengeFlow(state, playerScreen);
     }
-    if (['level-four-choice', 'level-four-walk', 'level-four-reflection', 'level-four-ending'].includes(state.mode)) {
+    if (['level-four-choice', 'level-four-walk', 'level-four-summary', 'level-four-reflection', 'level-four-ending'].includes(state.mode)) {
       this.updateFourthFlow(state);
     }
     if (state.mode === 'walking') this.updateWalking(state, playerScreen);
@@ -902,6 +917,7 @@ export class GameUI {
       [this.victoryScreen, state.mode === 'victory'],
       [this.fourthChoiceScreen, state.mode === 'level-four-choice'],
       [this.fourthWalkHud, state.mode === 'level-four-walk'],
+      [this.fourthSummaryScreen, state.mode === 'level-four-summary'],
       [this.fourthReflectionScreen, state.mode === 'level-four-reflection'],
       [this.fourthEndingScreen, state.mode === 'level-four-ending'],
       [this.walkingHud, state.mode === 'walking'],
@@ -933,12 +949,16 @@ export class GameUI {
     const unlockedEndingCount = FOURTH_ENDING_IDS.filter((endingId) => state.meta.fourthEndings[endingId]).length;
     this.getElement('level-clear-count').textContent = `${completedCount} / 3`;
     this.updateEndingGallery(state);
+    const endingMapVisible = unlockedEndingCount > 0;
+    this.getElement('fourth-ending-map').classList.toggle('is-hidden', !endingMapVisible);
+    if (!endingMapVisible) this.endingConnection.classList.add('is-hidden');
     LEVELS.forEach((level) => {
       const card = this.getElement(`level-card-${level.id}`) as HTMLButtonElement;
       const locked = level.id === 4 && completedCount < 3;
       const cleared = level.id !== 4 && state.meta.completed[level.id];
       card.disabled = locked;
       card.classList.toggle('is-locked', locked);
+      card.classList.toggle('is-concealed', locked && level.id === 4);
       card.classList.toggle('is-cleared', cleared);
       (card.querySelector('.level-state') as HTMLElement).textContent = locked
         ? `${CHALLENGE_UI.locked} · ${completedCount}/3`
@@ -1254,6 +1274,14 @@ export class GameUI {
       ? `${fourth.duration.toFixed(1)}s · ${collisionCount} collisions`
       : `${fourth.duration.toFixed(1)} 秒 · ${collisionCount} 次碰撞`;
     this.getElement('fourth-reflection-text').textContent = paceCopy.reflection;
+    const summaryText = fourth.pace === 'fast'
+      ? `高速追逐目标，撞人${collisionCount}次`
+      : fourth.pace === 'slow'
+        ? `就想慢慢走，被撞${collisionCount}次`
+        : `与众人同步，碰撞${collisionCount}次`;
+    this.getElement('fourth-summary-text').textContent = summaryText;
+    const summaryReady = fourth.summaryElapsed >= fourth.summaryDuration;
+    this.getElement('fourth-summary-continue').classList.toggle('is-hidden', !summaryReady);
     if (this.lastFourthReflectionPace !== fourth.pace) {
       this.lastFourthReflectionPace = fourth.pace;
       this.getElement('fourth-response-choices').replaceChildren(...FOURTH_RESPONSE_ORDER.map((response, index) => {
@@ -1262,7 +1290,7 @@ export class GameUI {
         button.type = 'button';
         button.dataset.fourthResponse = response;
         button.className = `is-${response}`;
-        button.innerHTML = `<span>0${index + 1}</span><strong>${copy.label}</strong><p>${copy.text}</p><i>→</i>`;
+        button.innerHTML = `<span>0${index + 1}</span><strong>${copy.text}</strong><p>${copy.label}</p><i>→</i>`;
         return button;
       }));
     }
