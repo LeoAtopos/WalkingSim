@@ -188,7 +188,7 @@ const EN: GameCopy = {
     mouseSpeed: 'Mouse speed controls',
     touchSpeed: 'Touch speed controls',
   },
-  intro: { line1: 'This is a “metaphorical” walking simulator.', line2: 'The only thing you can control is your pace.', start: 'Give it a try' },
+  intro: { line1: 'This is a “metaphorical” walking simulator.', line2: 'See it through to the end!', start: 'Give it a try' },
   share: {
     button: 'Share with a friend who keeps running into conflict',
     copied: 'Link copied to clipboard',
