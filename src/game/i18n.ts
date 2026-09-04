@@ -94,7 +94,7 @@ const ZH: GameCopy = {
     mouseSpeed: '鼠标速度控制',
     touchSpeed: '触屏速度控制',
   },
-  intro: { line1: '这是个「比喻性」的走路模拟器。', line2: '只能调节步速。', start: '玩一下' },
+  intro: { line1: '这是个「比喻性」的走路模拟器。', line2: '挑战到最后吧！', start: '玩一下' },
   share: {
     button: '点击分享给总是发生碰撞冲突的朋友',
     copied: '已复制到剪切板',
