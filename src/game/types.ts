@@ -14,6 +14,7 @@ export type GameMode =
   | 'level-four-summary'
   | 'level-four-reflection'
   | 'level-four-ending'
+  | 'all-endings'
   | 'walking'
   | 'return'
   | 'interaction'
@@ -146,6 +147,7 @@ export interface GameState {
   interaction: InteractionKind;
   interactionElapsed: number;
   interactionCount: number;
+  allEndingsElapsed: number;
   impactTime: number;
   impactTextTime: number;
   impactStrength: number;

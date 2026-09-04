@@ -24,6 +24,7 @@ interface UIActions {
   onChooseEvaluation: (choiceIndex: number) => void;
   onFinishWalk: () => void;
   onChooseInteraction: (kind: Exclude<InteractionKind, null>) => void;
+  onContinueAllEndings: () => void;
   onInteract: () => void;
   onDepart: () => void;
   onRestart: () => void;
@@ -133,6 +134,7 @@ export class GameUI {
   private readonly taskCompleteArt: HTMLElement;
   private readonly introScreen: HTMLElement;
   private readonly returnScreen: HTMLElement;
+  private readonly allEndingsScreen: HTMLElement;
   private readonly interactionScreen: HTMLElement;
   private readonly departedScreen: HTMLElement;
   private readonly speechBubble: HTMLElement;
@@ -458,6 +460,13 @@ export class GameUI {
         </div>
       </section>
 
+      <section id="all-endings-screen" class="scene-ui all-endings-screen is-hidden" aria-label="全结局达成">
+        <div class="all-endings-dialogue">
+          <h1>全结局达成</h1>
+          <p>点击继续</p>
+        </div>
+      </section>
+
       <section id="interaction-screen" class="scene-ui interaction-ui is-hidden" aria-label="${COPY.aria.interaction}">
         <div id="interaction-hint" class="interaction-hint" aria-live="polite"></div>
         <div id="interaction-burst" class="interaction-burst is-hidden">${COPY.interaction.punchEffect}</div>
@@ -531,6 +540,7 @@ export class GameUI {
     this.taskCompleteArt = this.getElement('task-complete-art');
     this.introScreen = this.getElement('intro-screen');
     this.returnScreen = this.getElement('return-screen');
+    this.allEndingsScreen = this.getElement('all-endings-screen');
     this.interactionScreen = this.getElement('interaction-screen');
     this.departedScreen = this.getElement('departed-screen');
     this.speechBubble = this.getElement('player-speech');
@@ -762,6 +772,11 @@ export class GameUI {
     window.addEventListener('pointerdown', (event) => {
       if (this.isExitConfirmationOpen()) return;
       if ((event.target as HTMLElement).closest('#audio-toggle')) return;
+      if (this.lastMode === 'all-endings') {
+        event.preventDefault();
+        this.actions.onContinueAllEndings();
+        return;
+      }
       if (this.lastMode === 'walking' && this.speechCanContinue) {
         event.preventDefault();
         this.actions.onDismissSpeech();
@@ -892,6 +907,7 @@ export class GameUI {
     }
     this.introScreen.classList.toggle('is-dialogue-waiting', state.mode === 'intro' && !portraitReady);
     this.returnScreen.classList.toggle('is-dialogue-waiting', state.mode === 'return' && !portraitReady);
+    this.allEndingsScreen.classList.toggle('is-ready', state.mode === 'all-endings' && state.allEndingsElapsed >= 1.5);
     if ((state.mode === 'intro' || state.mode === 'return') && portraitScreen.visible) {
       this.positionNearCharacter(state.mode === 'intro' ? this.introDialogue : this.returnDialogue, portraitScreen, 'portrait');
     }
@@ -922,6 +938,7 @@ export class GameUI {
       [this.fourthEndingScreen, state.mode === 'level-four-ending'],
       [this.walkingHud, state.mode === 'walking'],
       [this.returnScreen, state.mode === 'return'],
+      [this.allEndingsScreen, state.mode === 'all-endings'],
       [this.interactionScreen, state.mode === 'interaction'],
       [this.departedScreen, state.mode === 'departed'],
     ];

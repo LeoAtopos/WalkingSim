@@ -419,6 +419,7 @@ export class GameAudio {
       'level-four-summary': { music: 0.12, ambience: 0.06 },
       'level-four-reflection': { music: 0.16, ambience: 0.08 },
       'level-four-ending': { music: 0.45, ambience: 0.1 },
+      'all-endings': { music: 0.45, ambience: 0.1 },
       walking: { music: 0.38, ambience: 0.18 },
       return: { music: 0.28, ambience: 0.018 },
       interaction: { music: 0.22, ambience: 0.01 },

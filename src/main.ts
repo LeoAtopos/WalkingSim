@@ -51,6 +51,7 @@ class WalkingSimApp {
       onChooseEvaluation: (choiceIndex) => this.chooseEvaluation(choiceIndex),
       onFinishWalk: () => this.finishWalk(),
       onChooseInteraction: (kind) => this.chooseInteraction(kind),
+      onContinueAllEndings: () => this.simulation.continueAllEndings(),
       onInteract: () => this.interactWithLi(),
       onDepart: () => this.depart(),
       onRestart: () => this.restart(),

@@ -214,6 +214,7 @@ export class WalkingSimulation {
       interaction: null,
       interactionElapsed: 0,
       interactionCount: 0,
+      allEndingsElapsed: 0,
       impactTime: 0,
       impactTextTime: 0,
       impactStrength: 0,
@@ -301,6 +302,13 @@ export class WalkingSimulation {
     this.saveMeta();
   }
 
+  continueAllEndings(): void {
+    if (this.state.mode !== 'all-endings' || this.state.allEndingsElapsed < 1.5) return;
+    this.state.mode = 'return';
+    this.state.speech = null;
+    this.state.speechQueue = [];
+  }
+
   chooseFourthPace(pace: FourthPace): void {
     if (this.state.mode !== 'level-four-choice') return;
     const balance = getFourthBalance();
@@ -341,7 +349,10 @@ export class WalkingSimulation {
     this.state.meta.fourthEndings[endingId] = true;
     this.state.meta.latestFourthEnding = endingId;
     this.saveMeta();
-    this.state.mode = 'level-four-ending';
+    this.state.allEndingsElapsed = 0;
+    this.state.mode = FOURTH_ENDING_IDS.every((id) => this.state.meta.fourthEndings[id])
+      ? 'all-endings'
+      : 'level-four-ending';
   }
 
   finishFourthEnding(): void {
@@ -641,6 +652,7 @@ export class WalkingSimulation {
     if (state.mode === 'challenge-victory') this.updateChallengeVictory(dt);
     if (state.mode === 'level-four-walk') this.updateFourthWalk(dt);
     if (state.mode === 'level-four-summary') this.updateFourthSummary(dt);
+    if (state.mode === 'all-endings') this.state.allEndingsElapsed = Math.min(1.5, state.allEndingsElapsed + dt);
     if (state.mode === 'walking') this.updateWalking(dt);
   }
 
